@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MakTech IAMS — Industrial Attachment Management System</title>
+<link rel="stylesheet" href="css/theme.css">
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+<style>
+  .prototype-banner{ background:var(--gray-900); color:#fff; font-size:11.5px; padding:6px 14px; text-align:center; letter-spacing:.02em; }
+  .prototype-banner b{ color:var(--accent-2); }
+  .prototype-banner a{ color:#93c5fd; text-decoration:underline; }
+</style>
+</head>
+<body>
+
+<div class="prototype-banner">🧪 <b>Visual Prototype</b> — click-through demo, no real backend. Data resets on refresh. &nbsp;|&nbsp;
+  <a href="portal.html">Open Student Portal ↗</a> &nbsp;|&nbsp; <a href="verify.html">Open Certificate Verify Page ↗</a>
+</div>
+
+<div class="app-shell">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark logo-chip"><img src="assets/logo.svg" alt="MakTech logo"></div>
+      <div class="txt">
+        <b>MakTech IAMS</b>
+        <span>Industrial Attachment Management</span>
+      </div>
+    </div>
+
+    <nav id="nav-root">
+      <!-- populated by app.js -->
+    </nav>
+
+    <div class="sidebar-footer">
+      Session: 2025–2026 &middot; v0.1 Prototype
+    </div>
+  </aside>
+
+  <!-- ============ MAIN COLUMN ============ -->
+  <div class="main-col">
+    <header class="topbar">
+      <button class="icon-btn hamburger" id="btnHamburger">${'' /* icon injected by js */}</button>
+      <div>
+        <div class="page-title" id="pageTitle">Dashboard</div>
+        <div class="page-sub" id="pageSub">Welcome back, here's what's happening today</div>
+      </div>
+      <div class="topbar-search">
+        <span id="searchIcon"></span>
+        <input type="text" placeholder="Search students, leads, invoices, institutions…" id="globalSearch">
+      </div>
+      <div class="topbar-right">
+        <div class="role-switcher">
+          <select id="roleSwitch">
+            <option value="1">👑 Super Admin view</option>
+            <option value="2">🧑‍💼 Admin / Manager view</option>
+            <option value="3">📣 Marketing Officer view</option>
+            <option value="4">💰 Accountant view</option>
+            <option value="5">🎓 Coordinator / Teacher view</option>
+            <option value="6">🗂️ Front Desk view</option>
+            <option value="8">🕴️ Managing Director / Boss view</option>
+          </select>
+        </div>
+        <button class="icon-btn" id="btnNotif"><span class="dot"></span><span id="bellIcon"></span></button>
+        <div class="user-chip" id="userChip">
+          <div class="avatar sm">RI</div>
+          <div class="who">
+            <b>Rafiul Islam</b>
+            <span>Super Admin</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="content" id="viewRoot">
+      <!-- rendered by app.js router -->
+    </main>
+  </div>
+</div>
+
+<!-- ============ Generic Modal ============ -->
+<div class="overlay" id="modalOverlay">
+  <div class="modal" id="modalBox">
+    <div class="modal-head">
+      <div>
+        <h3 id="modalTitle">Title</h3>
+        <p id="modalSub" style="display:none;"></p>
+      </div>
+      <div class="close-x" id="modalClose"></div>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<!-- ============ Generic Drawer (detail panels) ============ -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div>
+      <h3 id="drawerTitle" style="margin:0;font-size:17px;">Title</h3>
+      <p id="drawerSub" style="margin:4px 0 0;font-size:12.5px;color:var(--gray-500);"></p>
+    </div>
+    <div class="close-x" id="drawerClose"></div>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="js/icons.js"></script>
+<script src="js/data.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/render-dashboard.js"></script>
+<script src="js/render-marketing.js"></script>
+<script src="js/render-academic.js"></script>
+<script src="js/render-students.js"></script>
+<script src="js/render-finance.js"></script>
+<script src="js/render-certificates.js"></script>
+<script src="js/render-reports.js"></script>
+<script src="js/render-admin.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Certificate Verification — MakTech IAMS</title>
+<link rel="stylesheet" href="css/theme.css">
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg">
+<style>
+  body{ background:var(--bg-app); }
+  .verify-shell{ min-height:100vh; display:flex; flex-direction:column; align-items:center; }
+  .verify-topbar{ width:100%; background:#fff; border-bottom:1px solid var(--gray-200); padding:16px 26px; display:flex; align-items:center; gap:10px; }
+  .verify-main{ max-width:640px; width:100%; padding:50px 20px; }
+  .verify-search-card{ background:#fff; border-radius:20px; padding:32px 30px; box-shadow:var(--shadow-md); text-align:center; }
+  .verify-result{ margin-top:22px; }
+  .big-icon{ width:56px; height:56px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 14px; }
+  .big-icon svg{ width:28px; height:28px; }
+</style>
+</head>
+<body>
+<div class="prototype-banner">🧪 <b>Visual Prototype</b> — public certificate verification page. &nbsp;|&nbsp;
+  <a href="index.html">Admin Panel ↗</a> &nbsp;|&nbsp; <a href="portal.html">Student Portal ↗</a>
+</div>
+
+<div class="verify-shell">
+  <div class="verify-topbar">
+    <div class="mark logo-chip" style="width:34px;height:34px;"><img src="assets/logo.svg" alt="MakTech logo"></div>
+    <b style="font-size:14.5px;">MakTech IAMS — Certificate Verification</b>
+  </div>
+
+  <div class="verify-main">
+    <div class="verify-search-card">
+      <div class="kpi-icon" style="width:52px;height:52px;background:var(--primary-50);color:var(--primary-600);margin:0 auto 16px;" id="qrIconWrap"></div>
+      <h2 style="margin:0 0 6px;font-size:19px;">Verify a Certificate</h2>
+      <p class="muted" style="font-size:13px;margin:0 0 22px;">Scan the QR code on the certificate, or enter the certificate number below to confirm its authenticity.</p>
+      <div class="flex-gap" style="max-width:420px;margin:0 auto;">
+        <input type="text" id="certInput" placeholder="e.g. MT-CERT-2026-0001" style="flex:1;border:1px solid var(--gray-200);border-radius:10px;padding:11px 14px;font-size:13.5px;">
+        <button class="btn btn-primary" id="btnVerify">Verify</button>
+      </div>
+      <p class="hint" style="margin-top:10px;">Try: <code>MT-CERT-2026-0001</code> (valid) or <code>MT-CERT-9999-0000</code> (invalid)</p>
+      <div class="verify-result" id="verifyResult"></div>
+    </div>
+
+    <div class="card card-pad mt-16" style="text-align:center;">
+      <p class="muted" style="font-size:12px;margin:0;">This public page lets employers, institutes and third parties confirm that a certificate issued by <b>MakTech Industrial Attachment Institute</b> is genuine, without needing to contact the office directly.</p>
+    </div>
+  </div>
+</div>
+
+<script src="js/icons.js"></script>
+<script src="js/data.js"></script>
+<script>
+  document.getElementById('qrIconWrap').innerHTML = ICONS.qr;
+  function doVerify(){
+    const val = document.getElementById('certInput').value.trim();
+    const resultBox = document.getElementById('verifyResult');
+    if(!val){ resultBox.innerHTML=''; return; }
+    const cert = DB.certificates.find(c => c.cert_no && c.cert_no.toLowerCase() === val.toLowerCase());
+    if(cert){
+      const s = studentById(cert.student_id);
+      resultBox.innerHTML = `
+        <div class="big-icon" style="background:var(--success-50);color:var(--success-600);">${ICONS.checkCircle}</div>
+        <h3 style="margin:0 0 4px;color:var(--success-700);font-size:16px;">Certificate Verified ✓</h3>
+        <p class="muted" style="font-size:12.5px;margin:0 0 18px;">This is a genuine certificate issued by MakTech IAMS.</p>
+        <div class="card card-pad" style="text-align:left;">
+          <div class="form-grid single" style="gap:10px;">
+            <div class="flex-between"><span class="muted" style="font-size:12.5px;">Student Name</span><b>${s.name}</b></div>
+            <div class="flex-between"><span class="muted" style="font-size:12.5px;">Course</span><b>${courseName(cert.course_id)}</b></div>
+            <div class="flex-between"><span class="muted" style="font-size:12.5px;">Certificate No.</span><b>${cert.cert_no}</b></div>
+            <div class="flex-between"><span class="muted" style="font-size:12.5px;">Issue Date</span><b>${fmtDate(cert.issue_date)}</b></div>
+            <div class="flex-between"><span class="muted" style="font-size:12.5px;">Status</span><span class="badge badge-green">Valid</span></div>
+          </div>
+        </div>`;
+    } else {
+      resultBox.innerHTML = `
+        <div class="big-icon" style="background:var(--danger-50);color:var(--danger-600);">${ICONS.alertCircle}</div>
+        <h3 style="margin:0 0 4px;color:var(--danger-700);font-size:16px;">Certificate Not Found</h3>
+        <p class="muted" style="font-size:12.5px;margin:0;">We couldn't verify "<b>${val}</b>". Please check the certificate number and try again, or contact the issuing office.</p>`;
+    }
+  }
+  document.getElementById('btnVerify').addEventListener('click', doVerify);
+  document.getElementById('certInput').addEventListener('keydown', e=>{ if(e.key==='Enter') doVerify(); });
+</script>
+</body>
+</html>
