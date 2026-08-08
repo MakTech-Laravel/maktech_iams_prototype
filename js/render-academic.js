@@ -265,7 +265,7 @@ function renderSessions(){
       <td>${courseName(s.course_id)}</td>
       <td>${fmtDate(s.start)} → ${fmtDate(s.end)}</td>
       <td>${batches.length} batch${batches.length!==1?'es':''}</td>
-      <td>${sum(batches,b=>b.enrolled)} students</td>
+      <td>${sum(batches,b=>batchEnrolledCount(b.id))} students</td>
       <td>${statusBadge(s.status)}</td>
     </tr>`;
   }).join('');
@@ -292,10 +292,10 @@ function sessionDetailModal(id){
   openModal({ size:'lg',
     title:s.name, sub:`${courseName(s.course_id)} · ${fmtDate(s.start)} → ${fmtDate(s.end)}`,
     body:`
-    <div class="flex-gap" style="margin-bottom:18px;">${statusBadge(s.status)}<span class="badge badge-gray">${batches.length} batch${batches.length!==1?'es':''}</span><span class="badge badge-blue">${sum(batches,b=>b.enrolled)} students total</span></div>
+    <div class="flex-gap" style="margin-bottom:18px;">${statusBadge(s.status)}<span class="badge badge-gray">${batches.length} batch${batches.length!==1?'es':''}</span><span class="badge badge-blue">${sum(batches,b=>batchEnrolledCount(b.id))} students total</span></div>
     <div class="flex-between" style="margin-bottom:8px;"><h3 style="font-size:13px;margin:0;">Batches in this Session</h3><button class="btn btn-sm btn-primary" onclick="closeModal()" data-action="open-add-batch" data-sessionid="${s.id}">${icon('plus')} Add Batch</button></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>Batch</th><th>Assigned Teacher(s)</th><th>Room</th><th>Capacity</th><th>Status</th></tr></thead><tbody>
-    ${batches.length ? batches.map(b=>`<tr class="row-link" data-action="view-batch" data-id="${b.id}" onclick="closeModal()"><td class="cell-strong">${b.name}</td><td>${(b.assigned_teachers||[]).map(tid=>userName(tid)).join(', ')||'—'}</td><td>${b.room}</td><td>${b.enrolled}/${b.capacity}</td><td>${statusBadge(b.status)}</td></tr>`).join('') : `<tr><td colspan="5" class="muted">No batches yet in this session — add one to start enrolling students.</td></tr>`}
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Batch</th><th>Assigned Teacher(s)</th><th>Lab</th><th>Capacity</th><th>Status</th></tr></thead><tbody>
+    ${batches.length ? batches.map(b=>`<tr class="row-link" data-action="view-batch" data-id="${b.id}" onclick="closeModal()"><td class="cell-strong">${b.name}</td><td>${(b.assigned_teachers||[]).map(tid=>userName(tid)).join(', ')||'—'}</td><td>${labName(b.lab_id)}</td><td>${batchEnrolledCount(b.id)}/${effectiveBatchCapacity(b)}</td><td>${statusBadge(b.status)}</td></tr>`).join('') : `<tr><td colspan="5" class="muted">No batches yet in this session — add one to start enrolling students.</td></tr>`}
     </tbody></table></div>
     `,
     foot:`<button class="btn btn-secondary" onclick="closeModal()">Close</button><button class="btn btn-outline" data-action="view-course" data-id="${s.course_id}" onclick="closeModal()">${icon('course')} View Course</button>`
@@ -320,18 +320,21 @@ function addSessionModal(courseId){
 function renderBatches(){
   const visibleBatches = scopedBatchesForUser(currentUserId);
   const isScoped = isTeacherRole(currentUserId);
-  const rows = visibleBatches.map(b=>`
+  const rows = visibleBatches.map(b=>{
+    const seatsLeft = batchSeatsAvailable(b.id);
+    return `
     <tr>
       <td class="row-link cell-strong" data-action="view-batch" data-id="${b.id}">${b.name}</td>
       <td>${courseName(b.course_id)}</td>
       <td>${sessionName(b.session_id)}</td>
       <td>${fmtDate(b.start)} → ${fmtDate(b.end)}</td>
       <td>${(b.assigned_teachers||[]).map(tid=>`<span class="badge badge-purple" style="margin:1px;">${userName(tid)}</span>`).join(' ') || '<span class="muted">Unassigned</span>'}</td>
-      <td>${b.room}</td>
-      <td>${b.enrolled}/${b.capacity}</td>
+      <td>${labName(b.lab_id)}</td>
+      <td>${batchEnrolledCount(b.id)}/${effectiveBatchCapacity(b)} ${b.status!=='completed' && seatsLeft<=0 ? '<span class="badge badge-red">Full</span>' : ''}</td>
       <td>${statusBadge(b.status)}</td>
-      <td>${effectivePerm(currentUserId,'Batches','Edit') ? `<button class="btn btn-sm btn-ghost" title="Assign/manage teachers" data-action="open-manage-teachers" data-id="${b.id}">${icon('user')}</button>` : ''}</td>
-    </tr>`).join('');
+      <td>${effectivePerm(currentUserId,'Batches','Edit') ? `<button class="btn btn-sm btn-ghost" title="Assign/manage teachers" data-action="open-manage-teachers" data-id="${b.id}">${icon('user')}</button><button class="btn btn-sm btn-ghost" title="Edit batch" data-action="open-edit-batch" data-id="${b.id}">${icon('edit')}</button>` : ''}</td>
+    </tr>`;
+  }).join('');
 
   const todaySchedule = DB.classSchedule.filter(c=>visibleBatches.some(b=>b.id===c.batch_id)).filter(c=>c.date==='2026-08-06'||c.date==='2026-08-07');
   const scheduleRows = todaySchedule.map(c=>`
@@ -348,11 +351,12 @@ function renderBatches(){
     ${kpiCard('batch','Ongoing Batches', visibleBatches.filter(b=>b.status==='ongoing').length, null, '#ff6533')}
     ${kpiCard('calendar','Upcoming Batches', visibleBatches.filter(b=>b.status==='upcoming').length, null, '#06b6d4')}
     ${kpiCard('checkCircle','Completed Batches', visibleBatches.filter(b=>b.status==='completed').length, null, '#10b981')}
-    ${kpiCard('students','Total Enrolled (Active)', sum(visibleBatches.filter(b=>b.status!=='completed'),b=>b.enrolled), null, '#f59e0b')}
+    ${kpiCard('students','Total Enrolled (Active)', sum(visibleBatches.filter(b=>b.status!=='completed'),b=>batchEnrolledCount(b.id)), null, '#f59e0b')}
   </div>
+  ${!isScoped ? labsSectionHtml() : ''}
   <div class="card mb-0" style="margin-bottom:20px;">
     <div class="card-header"><h3>${isScoped?'My Batches':'All Batches'}</h3></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>Batch</th><th>Course</th><th>Session</th><th>Duration</th><th>Assigned Teacher(s)</th><th>Room</th><th>Capacity</th><th>Status</th><th></th></tr></thead>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Batch</th><th>Course</th><th>Session</th><th>Duration</th><th>Assigned Teacher(s)</th><th>Lab</th><th>Enrolled/Capacity</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div>
   </div>
   <div class="card">
@@ -365,15 +369,19 @@ function renderBatches(){
 function manageTeachersModal(batchId){
   const b = DB.batches.find(x=>x.id===batchId); if(!b) return;
   const teachers = DB.users.filter(u=>u.role_id===5);
+  const canPay = effectivePerm(currentUserId,'TeacherPayments','Edit');
   openModal({
     title:`Assign Teachers — ${b.name}`, sub:`${courseName(b.course_id)} · Assigned teachers can ONLY access this batch (not the whole system)`,
-    body:`<div class="table-wrap"><table class="data-table"><thead><tr><th></th><th>Teacher</th><th>Role</th><th style="text-align:center;">Assigned</th></tr></thead><tbody>
-      ${teachers.map(t=>`<tr><td>${avatarHtml(t.name,'sm')}</td><td class="cell-strong">${t.name}</td><td>${roleName(t.role_id)}</td>
-        <td style="text-align:center;"><input type="checkbox" ${(b.assigned_teachers||[]).includes(t.id)?'checked':''} data-action="toggle-batch-teacher" data-batchid="${b.id}" data-teacherid="${t.id}"></td></tr>`).join('')}
+    body:`<div class="table-wrap"><table class="data-table"><thead><tr><th></th><th>Teacher</th><th>Role</th><th style="text-align:center;">Assigned</th>${canPay?'<th>Pay Rate</th>':''}</tr></thead><tbody>
+      ${teachers.map(t=>{ const assigned = (b.assigned_teachers||[]).includes(t.id); const rate = payRateFor(t.id, b.id);
+        return `<tr><td>${avatarHtml(t.name,'sm',t.photo)}</td><td class="cell-strong">${t.name}</td><td>${roleName(t.role_id)}</td>
+        <td style="text-align:center;"><input type="checkbox" ${assigned?'checked':''} data-action="toggle-batch-teacher" data-batchid="${b.id}" data-teacherid="${t.id}"></td>
+        ${canPay ? `<td>${assigned ? `<button class="btn btn-sm btn-ghost" onclick="closeModal()" data-action="open-set-payrate" data-teacherid="${t.id}" data-batchid="${b.id}">${rate?fmtMoney(rate.rate_amount)+' '+PAY_RATE_TYPE_LABELS[rate.rate_type]:icon('plus')+' Set Rate'}</button>` : '<span class="muted">—</span>'}</td>` : ''}
+        </tr>`; }).join('')}
     </tbody></table></div>
     <div class="hr"></div>
     <div class="cell-sub">Current coordinator (primary contact): <b>${userName(b.coordinator_id)}</b></div>`,
-    foot:`<button class="btn btn-secondary" onclick="closeModal()">Close</button><button class="btn btn-primary" data-action="save-teacher-assignment">${icon('check')} Done</button>`
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Close</button>${canPay?`<button class="btn btn-outline" onclick="closeModal()" data-action="go-view" data-view="teacher-payments">${icon('graduationCap')} Open Teacher Payments</button>`:''}<button class="btn btn-primary" data-action="save-teacher-assignment">${icon('check')} Done</button>`
   });
 }
 
@@ -381,14 +389,15 @@ function batchDetailModal(id){
   const b = DB.batches.find(x=>x.id===id); if(!b) return;
   const course = DB.courses.find(c=>c.id===b.course_id);
   const roster = DB.students.filter(s=>s.courses.some(sc=>sc.batch_id===id));
+  const seatsLeft = batchSeatsAvailable(b.id);
   openModal({ size:'lg',
-    title:b.name, sub:`${course.name} · ${sessionName(b.session_id)} · ${b.room}`,
+    title:b.name, sub:`${course.name} · ${sessionName(b.session_id)} · ${labName(b.lab_id)}`,
     body:`
-    <div class="flex-gap" style="margin-bottom:10px;flex-wrap:wrap;">${statusBadge(b.status)}<span class="badge badge-gray">${fmtDate(b.start)} → ${fmtDate(b.end)}</span><span class="badge badge-blue">Coordinator: ${userName(b.coordinator_id)}</span></div>
+    <div class="flex-gap" style="margin-bottom:10px;flex-wrap:wrap;">${statusBadge(b.status)}<span class="badge badge-gray">${fmtDate(b.start)} → ${fmtDate(b.end)}</span><span class="badge badge-blue">Coordinator: ${userName(b.coordinator_id)}</span>${b.status!=='completed' ? (seatsLeft>0 ? `<span class="badge badge-green">${icon('checkCircle')} ${seatsLeft} seat${seatsLeft!==1?'s':''} left</span>` : `<span class="badge badge-red">${icon('alertCircle')} Full</span>`) : ''}</div>
     <div class="flex-gap" style="margin-bottom:16px;flex-wrap:wrap;"><span class="cell-sub">Assigned teachers:</span>${(b.assigned_teachers||[]).map(tid=>`<span class="badge badge-purple">${userName(tid)}</span>`).join(' ')||'<span class="muted">None</span>'}
       <button class="btn btn-sm btn-ghost" data-action="open-manage-teachers" data-id="${b.id}" onclick="closeModal()">${icon('edit')} Manage</button></div>
     <div class="grid grid-3" style="margin-bottom:20px;">
-      <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;">${b.enrolled}/${b.capacity}</div><div class="cell-sub">Enrolled</div></div>
+      <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;">${batchEnrolledCount(b.id)}/${effectiveBatchCapacity(b)}</div><div class="cell-sub">Enrolled · ${labName(b.lab_id)}</div></div>
       <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;">${attendanceSummaryForBatch(b.id).avgPct}%</div><div class="cell-sub">Avg Attendance</div></div>
       <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;">${course.modules.length}</div><div class="cell-sub">Modules</div></div>
     </div>
@@ -400,28 +409,113 @@ function batchDetailModal(id){
     }).join('') : `<tr><td colspan="4" class="muted">No students in this batch view (demo subset).</td></tr>`}
     </tbody></table></div>
     `,
-    foot:`<button class="btn btn-secondary" onclick="closeModal()">Close</button><button class="btn btn-outline" data-action="go-view" data-view="attendance">${icon('attendance')} Mark Attendance</button>`
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Close</button>${effectivePerm(currentUserId,'Batches','Edit')?`<button class="btn btn-outline" data-action="open-edit-batch" data-id="${b.id}" onclick="closeModal()">${icon('edit')} Edit Batch</button>`:''}${effectivePerm(currentUserId,'TeacherPayments','View')?`<button class="btn btn-outline" data-action="go-view" data-view="teacher-payments">${icon('graduationCap')} Teacher Payments</button>`:''}<button class="btn btn-outline" data-action="go-view" data-view="attendance">${icon('attendance')} Mark Attendance</button>`
+  });
+}
+
+/* ---------------- LABS / CLASSROOMS (dynamic — create with capacity, edit, and see which batches use them) ---------------- */
+function labsSectionHtml(){
+  const canEdit = effectivePerm(currentUserId,'Batches','Edit');
+  const canCreate = effectivePerm(currentUserId,'Batches','Create');
+  const rows = DB.labs.map(l=>{
+    const usingBatches = batchesUsingLab(l.id);
+    return `<tr>
+      <td class="cell-strong">${l.name}</td>
+      <td>${l.location||'—'}</td>
+      <td>${l.capacity} seats</td>
+      <td>${usingBatches.length ? usingBatches.map(b=>`<span class="badge badge-blue" style="margin:1px;">${b.name}</span>`).join(' ') : '<span class="muted">Unassigned</span>'}</td>
+      <td>${statusBadge(l.status)}</td>
+      <td>${canEdit ? `<button class="btn btn-sm btn-ghost" title="Edit lab" data-action="open-edit-lab" data-id="${l.id}">${icon('edit')}</button>` : ''}</td>
+    </tr>`;
+  }).join('');
+  return `
+  <div class="card mb-0" style="margin-bottom:20px;">
+    <div class="card-header"><div><h3>${icon('flask')} Labs / Classrooms</h3><p>Create labs with a fixed seat capacity — assign one to each batch below so student intake is automatically capped</p></div>${canCreate ? `<button class="btn btn-outline btn-sm" data-action="open-add-lab">${icon('plus')} Add Lab</button>` : ''}</div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Lab</th><th>Location</th><th>Capacity</th><th>Batches Using It</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6" class="muted">No labs created yet.</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+function addLabModal(){
+  openModal({
+    title:'Add Lab / Classroom', sub:'Define a physical space with a fixed seat capacity',
+    body:`<div class="form-grid">
+      <div class="field span-2"><label>Lab / Room Name *</label><input type="text" id="nlName" placeholder="e.g. Lab-4"></div>
+      <div class="field"><label>Capacity (seats) *</label><input type="number" id="nlCapacity" placeholder="35"></div>
+      <div class="field"><label>Location</label><input type="text" id="nlLocation" placeholder="e.g. Main Building, 2nd Floor"></div>
+      <div class="field span-2"><label>Notes</label><input type="text" id="nlNotes" placeholder="Optional — equipment, purpose, etc."></div>
+    </div>`,
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-lab">${icon('check')} Save Lab</button>`
+  });
+}
+function editLabModal(id){
+  const l = labById(id); if(!l) return;
+  const usingBatches = batchesUsingLab(l.id);
+  openModal({
+    title:'Edit Lab / Classroom', sub:l.name,
+    body:`${usingBatches.length ? `<div class="badge badge-amber" style="white-space:normal;text-align:left;margin-bottom:14px;">${icon('alertCircle')} Currently assigned to ${usingBatches.length} active batch${usingBatches.length!==1?'es':''} (${usingBatches.map(b=>b.name).join(', ')}). Reducing capacity below a batch's current enrollment will immediately block further registrations into that batch.</div>` : ''}
+    <div class="form-grid">
+      <div class="field span-2"><label>Lab / Room Name *</label><input type="text" id="elName" value="${l.name}"></div>
+      <div class="field"><label>Capacity (seats) *</label><input type="number" id="elCapacity" value="${l.capacity}"></div>
+      <div class="field"><label>Status</label><select id="elStatus"><option value="active" ${l.status==='active'?'selected':''}>Active</option><option value="inactive" ${l.status==='inactive'?'selected':''}>Inactive (not selectable for new batches)</option></select></div>
+      <div class="field"><label>Location</label><input type="text" id="elLocation" value="${l.location||''}"></div>
+      <div class="field span-2"><label>Notes</label><input type="text" id="elNotes" value="${l.notes||''}"></div>
+    </div>`,
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-lab-edit" data-id="${l.id}">${icon('check')} Save Changes</button>`
   });
 }
 
 function addBatchModal(sessionId){
+  const labs = activeLabs();
   openModal({
-    title:'Create New Batch', sub:'Set up a batch/class group inside a course session',
+    title:'Create New Batch', sub:'Set up a batch/class group inside a course session — capacity is automatically capped by the assigned lab',
     body:`<div class="form-grid">
-      <div class="field span-2"><label>Session *</label><select>${DB.courses.map(c=>{
+      <div class="field span-2"><label>Session *</label><select id="nbSession">${DB.courses.map(c=>{
         const opts = sessionsForCourse(c.id).map(s=>`<option value="${s.id}" ${s.id==sessionId?'selected':''}>${s.name}</option>`).join('');
         return opts ? `<optgroup label="${c.name}">${opts}</optgroup>` : '';
       }).join('')}</select></div>
-      <div class="field"><label>Batch Name *</label><input type="text" placeholder="e.g. Batch-26-F"></div>
-      <div class="field"><label>Capacity *</label><input type="number" placeholder="35"></div>
-      <div class="field"><label>Start Date *</label><input type="date"></div>
-      <div class="field"><label>End Date *</label><input type="date"></div>
-      <div class="field"><label>Coordinator</label><select>${DB.users.filter(u=>u.role_id===5).map(u=>`<option>${u.name}</option>`).join('')}</select></div>
-      <div class="field"><label>Room</label><input type="text" placeholder="e.g. Lab-3"></div>
+      <div class="field"><label>Batch Name *</label><input type="text" id="nbName" placeholder="e.g. Batch-26-F"></div>
+      <div class="field"><label>Lab / Classroom *</label><select id="nbLab" onchange="onBatchLabChange('nbLab','nbCapacity','nbSeatsHint')">${labs.length ? labs.map(l=>`<option value="${l.id}">${l.name} (max ${l.capacity})</option>`).join('') : '<option value="">No labs available — create one first</option>'}</select></div>
+      <div class="field"><label>Capacity *</label><input type="number" id="nbCapacity" placeholder="35" value="${labs[0]?labs[0].capacity:''}"><span class="hint" id="nbSeatsHint" style="display:block;font-size:11.5px;color:var(--gray-500);margin-top:4px;">${labs[0] ? 'Max '+labs[0].capacity+' (limited by '+labs[0].name+')' : ''}</span></div>
+      <div class="field"><label>Start Date *</label><input type="date" id="nbStart"></div>
+      <div class="field"><label>End Date *</label><input type="date" id="nbEnd"></div>
+      <div class="field"><label>Coordinator</label><select id="nbCoordinator">${DB.users.filter(u=>u.role_id===5).map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}</select></div>
+      <div class="field"><label>Status</label><select id="nbStatus"><option value="upcoming">Upcoming</option><option value="ongoing">Ongoing</option></select></div>
       <div class="field span-2"><label>Assigned Teachers (they will ONLY see this batch)</label>
-        <div class="flex-gap" style="flex-wrap:wrap;gap:12px;">${DB.users.filter(u=>u.role_id===5).map(u=>`<label class="flex-gap" style="font-size:12.5px;cursor:pointer;"><input type="checkbox"> ${u.name}</label>`).join('')}</div>
+        <div class="flex-gap" style="flex-wrap:wrap;gap:12px;">${DB.users.filter(u=>u.role_id===5).map(u=>`<label class="flex-gap" style="font-size:12.5px;cursor:pointer;"><input type="checkbox" class="nbTeacherCb" value="${u.id}"> ${u.name}</label>`).join('')}</div>
       </div>
     </div>`,
     foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-batch">${icon('check')} Create Batch</button>`
+  });
+}
+/* Keeps the capacity input clamped to the selected lab's capacity as soon as the lab changes. */
+function onBatchLabChange(labSelId, capInputId, hintId){
+  const lab = labById(document.getElementById(labSelId)?.value);
+  const capInput = document.getElementById(capInputId);
+  const hint = document.getElementById(hintId);
+  if(!lab || !capInput) return;
+  capInput.setAttribute('max', lab.capacity);
+  if(!capInput.value || Number(capInput.value) > lab.capacity) capInput.value = lab.capacity;
+  if(hint) hint.textContent = `Max ${lab.capacity} (limited by ${lab.name})`;
+}
+
+function editBatchModal(id){
+  const b = DB.batches.find(x=>x.id===id); if(!b) return;
+  const labs = activeLabs();
+  const currentLab = labById(b.lab_id);
+  const labOptions = (currentLab && !labs.some(l=>l.id===currentLab.id) ? [currentLab, ...labs] : labs);
+  openModal({
+    title:'Edit Batch', sub:`${b.name} · ${courseName(b.course_id)}`,
+    body:`<div class="form-grid">
+      <div class="field"><label>Batch Name *</label><input type="text" id="ebName" value="${b.name}"></div>
+      <div class="field"><label>Status</label>${effectivePerm(currentUserId,'Batches','ChangeStatus') ?
+        `<select id="ebStatus">${['upcoming','ongoing','completed'].map(s=>`<option value="${s}" ${s===b.status?'selected':''}>${s[0].toUpperCase()+s.slice(1)}</option>`).join('')}</select>`
+        : `<div>${statusBadge(b.status)}<input type="hidden" id="ebStatus" value="${b.status}"><span class="hint" style="display:block;">${icon('shield')} You don't have permission to change batch status</span></div>`}</div>
+      <div class="field"><label>Lab / Classroom *</label><select id="ebLab" onchange="onBatchLabChange('ebLab','ebCapacity','ebSeatsHint')">${labOptions.map(l=>`<option value="${l.id}" ${l.id===b.lab_id?'selected':''}>${l.name} (max ${l.capacity})</option>`).join('')}</select></div>
+      <div class="field"><label>Capacity *</label><input type="number" id="ebCapacity" value="${b.capacity}" max="${currentLab?currentLab.capacity:''}"><span class="hint" id="ebSeatsHint" style="display:block;font-size:11.5px;color:var(--gray-500);margin-top:4px;">${currentLab ? 'Max '+currentLab.capacity+' (limited by '+currentLab.name+') · currently '+batchEnrolledCount(b.id)+' enrolled' : ''}</span></div>
+      <div class="field"><label>Start Date *</label><input type="date" id="ebStart" value="${b.start}"></div>
+      <div class="field"><label>End Date *</label><input type="date" id="ebEnd" value="${b.end}"></div>
+      <div class="field"><label>Coordinator</label><select id="ebCoordinator">${DB.users.filter(u=>u.role_id===5).map(u=>`<option value="${u.id}" ${u.id===b.coordinator_id?'selected':''}>${u.name}</option>`).join('')}</select></div>
+    </div>`,
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-batch-edit" data-id="${b.id}">${icon('check')} Save Changes</button>`
   });
 }

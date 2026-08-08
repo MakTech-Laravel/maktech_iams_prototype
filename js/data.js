@@ -27,8 +27,11 @@ DB.roles = [
   { id:8, name:"Managing Director / Boss", users:1, desc:"Senior management — cash custodian for handovers, financial oversight & final sign-off" },
 ];
 
-DB.permModules = ["Institutions","Leads/CRM","Courses","Students","Batches","Attendance","Payments","CashManagement","Expenses","Certificates","Reports","Notifications","Users","Audit","Settings"];
-DB.permActions = ["View","Create","Edit","Delete","Approve"];
+DB.permModules = ["Institutions","Leads/CRM","Courses","Students","Batches","Attendance","Payments","CashManagement","Expenses","TeacherPayments","Certificates","Reports","Notifications","Users","Audit","Settings"];
+/* "ChangeStatus" is a generic action available on every module (Students, Payments, Batches, etc.) — it's
+   deliberately separate from "Edit" so an org can let someone edit a record's details without letting them
+   change its lifecycle status (e.g. mark a student Dropped, or force an invoice to Paid/Cancelled). */
+DB.permActions = ["View","Create","Edit","Delete","Approve","ChangeStatus"];
 DB.rolePermMatrix = {
   1:{}, 2:{}, 3:{}, 4:{}, 5:{}, 6:{}, 7:{}, 8:{}
 };
@@ -40,15 +43,27 @@ function seedPerm(roleId, mod, actions){ DB.permModules.includes(mod) && actions
 DB.permModules.forEach(m=> seedPerm(1,m,DB.permActions));
 ["Institutions","Leads/CRM","Courses","Students","Batches","Attendance","Payments","CashManagement","Expenses","Certificates","Reports","Notifications"].forEach(m=> seedPerm(2,m,["View","Create","Edit","Approve"]));
 seedPerm(2,"Users",["View","Create","Edit"]); seedPerm(2,"Audit",["View"]);
+seedPerm(2,"TeacherPayments",["View","Create","Edit","Approve"]); // Admin/Manager sets pay rates, raises & approves teacher payments
 seedPerm(3,"Leads/CRM",["View","Create","Edit"]); seedPerm(3,"Institutions",["View","Create","Edit"]); seedPerm(3,"Reports",["View"]);
 seedPerm(4,"Payments",["View","Create","Edit","Approve"]); seedPerm(4,"CashManagement",["View","Create","Edit"]); seedPerm(4,"Expenses",["View","Create","Edit","Approve"]); seedPerm(4,"Reports",["View"]); seedPerm(4,"Students",["View"]);
+seedPerm(4,"TeacherPayments",["View","Create","Edit","Approve"]); // Accountant disburses approved teacher payments & can also raise/approve them
 seedPerm(5,"Batches",["View","Edit"]); seedPerm(5,"Attendance",["View","Create","Edit"]); seedPerm(5,"Students",["View"]); seedPerm(5,"Courses",["View"]);
+seedPerm(5,"TeacherPayments",["View"]); // Coordinator/Teacher can only VIEW their own pay rate & payment history (batch-scoped) — never raise/approve/pay
 seedPerm(6,"Students",["View","Create","Edit"]); seedPerm(6,"Courses",["View"]);
 seedPerm(7,"Reports",["View"]); seedPerm(7,"Audit",["View"]); DB.permModules.forEach(m=> seedPerm(7,m,["View"]));
 // Managing Director/Boss — oversight + the one who signs for cash handed over from Accountants; deliberately
 // does NOT get Create on CashManagement (separation of duties: the person who receives cash shouldn't also
 // be the one logging the collection) but CAN Approve (= sign/confirm receipt) and view Payments/Reports.
 seedPerm(8,"CashManagement",["View","Approve"]); seedPerm(8,"Payments",["View"]); seedPerm(8,"Expenses",["View","Approve"]); seedPerm(8,"Reports",["View"]); seedPerm(8,"Students",["View"]);
+seedPerm(8,"TeacherPayments",["View","Approve"]); // MD/Boss can review & approve, same separation-of-duties pattern as CashManagement
+
+/* "Change Status" — who can flip a record's lifecycle status (student active/dropped/etc., invoice
+   paid/cancelled/etc., a batch's upcoming/ongoing/completed). Deliberately NOT granted to everyone who
+   has "Edit" — e.g. Front Desk can edit a student's profile fields but Coordinators/Teachers can't
+   change status at all, demonstrating this is independent from Edit. */
+seedPerm(2,"Students",["ChangeStatus"]); seedPerm(2,"Payments",["ChangeStatus"]); seedPerm(2,"Batches",["ChangeStatus"]);
+seedPerm(4,"Payments",["ChangeStatus"]); // Accountant can correct/cancel an invoice's status
+seedPerm(6,"Students",["ChangeStatus"]); // Front Desk updates a student's enrollment status (active/on-hold/dropped) as part of registration duties
 
 /* ---------------- Per-user permission overrides (admin can override role defaults for ANY specific user) ---------------- */
 DB.userPermOverrides = {}; // { [userId]: { [module]: { [action]: true|false } } } — only explicit overrides stored; everything else falls back to role default
@@ -67,6 +82,82 @@ function setUserPermOverride(userId, mod, action, value){
 }
 function clearUserPermOverrides(userId){ delete DB.userPermOverrides[userId]; }
 function hasAnyOverride(userId){ return !!DB.userPermOverrides[userId] && Object.keys(DB.userPermOverrides[userId]).length>0; }
+
+/* ============================================================
+   FINE-GRAINED ACCESS — beyond the Module × Action matrix above.
+   These reuse the exact same rolePermMatrix / userPermOverrides / effectivePerm machinery (they're just
+   extra string keys inside the same per-module object), so every override, "Custom" badge, and "Reset to
+   Role Default" button already works for them with zero extra plumbing:
+     • Per-report access:  effectivePerm(userId, 'Reports', 'Report_<id>')
+     • Per-list access:    effectivePerm(userId, 'Payments'|'Students', 'List_<key>')
+     • Admin Panel access: effectivePerm(userId, 'Users', 'AdminPanelAccess')  — see teacher-portal gating below
+   ============================================================ */
+
+/* ---- Per-report permissions — a report is invisible/blocked unless explicitly allowed for this role/user.
+   IDs must stay in sync with the REPORTS catalogue in render-reports.js (ids 1–44, grouped exactly as there). */
+const REPORT_IDS = {
+  marketing: [1,2,3,4,5,6,7,8],
+  studentAcademic: [9,10,11,12,13,14,15,16,17],
+  financial: [18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,42],
+  teacherPayment: [43,44],
+  certificateId: [36,37,38],
+  system: [39,40,41],
+};
+const ALL_REPORT_IDS = Object.values(REPORT_IDS).flat();
+function seedReportAccess(roleId, ids){ ids.forEach(id=> DB.rolePermMatrix[roleId]["Reports"]["Report_"+id] = true); }
+function canAccessReport(userId, reportId){
+  return effectivePerm(userId,'Reports','View') && effectivePerm(userId,'Reports','Report_'+reportId);
+}
+
+seedReportAccess(1, ALL_REPORT_IDS); // Super Admin — everything
+seedReportAccess(2, ALL_REPORT_IDS); // Admin/Manager — full operational access
+seedReportAccess(3, REPORT_IDS.marketing); // Marketing Officer — only their own funnel/conversion reports
+seedReportAccess(4, [...REPORT_IDS.financial, ...REPORT_IDS.teacherPayment]); // Accountant — money reports only
+seedReportAccess(7, ALL_REPORT_IDS); // Auditor — read-only visibility into everything
+seedReportAccess(8, [...REPORT_IDS.financial, ...REPORT_IDS.teacherPayment, ...REPORT_IDS.system]); // MD/Boss — oversight-level reports
+// Coordinator/Teacher (5) and Front Desk (6) get no reports by default — Reports isn't even in their nav.
+// Demonstrates per-USER granularity on top of the per-ROLE default: Kamrul (Front Desk, role 6, id 8) is
+// individually granted two student reports even though his role gets none.
+setUserPermOverride(8, 'Reports', 'View', true);
+setUserPermOverride(8, 'Reports', 'Report_9', true);
+setUserPermOverride(8, 'Reports', 'Report_10', true);
+
+/* ---- Per-list ("sub-view") permissions — lets Admin show/hide specific status-filtered lists inside a
+   page (e.g. an Accountant who should see the Due list but never browse the full Paid history). */
+const PAYMENT_LIST_KEYS = ['Paid','Partial','Due','Overdue'];
+const STUDENT_LIST_KEYS = ['Active','Dropped','OnHold','Completed'];
+function seedListAccess(roleId, mod, keys){ keys.forEach(k=> DB.rolePermMatrix[roleId][mod]['List_'+k] = true); }
+function canViewList(userId, mod, key){ return effectivePerm(userId, mod, 'List_'+key); }
+
+seedListAccess(1,'Payments',PAYMENT_LIST_KEYS); seedListAccess(1,'Students',STUDENT_LIST_KEYS);
+seedListAccess(2,'Payments',PAYMENT_LIST_KEYS); seedListAccess(2,'Students',STUDENT_LIST_KEYS);
+seedListAccess(4,'Payments',PAYMENT_LIST_KEYS); seedListAccess(4,'Students',['Active']); // Accountant: full payment lists, but only the Active student list
+seedListAccess(5,'Students',STUDENT_LIST_KEYS); // Coordinator/Teacher — already batch-scoped, so no extra status restriction needed
+seedListAccess(6,'Students',STUDENT_LIST_KEYS); // Front Desk needs every status while registering/tracking students
+seedListAccess(7,'Payments',PAYMENT_LIST_KEYS); seedListAccess(7,'Students',STUDENT_LIST_KEYS); // Auditor sees all lists
+seedListAccess(8,'Payments',PAYMENT_LIST_KEYS); seedListAccess(8,'Students',['Active']); // MD/Boss: full financial picture, active students only
+
+const INVOICE_STATUS_TO_LIST_KEY = { paid:'Paid', partial:'Partial', due:'Due', overdue:'Overdue', cancelled:'Overdue' };
+function allowedInvoiceStatuses(userId){
+  return PAYMENT_LIST_KEYS.filter(k=>canViewList(userId,'Payments',k)).map(k=>k.toLowerCase());
+}
+function visibleInvoicesForUser(userId, invoices){
+  const allowed = allowedInvoiceStatuses(userId);
+  return (invoices||DB.feeInvoices).filter(i=> allowed.includes(INVOICE_STATUS_TO_LIST_KEY[i.status]?.toLowerCase() || i.status));
+}
+const STUDENT_STATUS_TO_LIST_KEY = { active:'Active', prospect:'Active', admitted:'Active', dropped:'Dropped', on_hold:'OnHold', completed:'Completed', certified:'Completed' };
+function allowedStudentStatusKeys(userId){ return STUDENT_LIST_KEYS.filter(k=>canViewList(userId,'Students',k)); }
+function visibleStudentsForUser(userId, students){
+  const allowedKeys = allowedStudentStatusKeys(userId);
+  return (students||DB.students).filter(s=> allowedKeys.includes(STUDENT_STATUS_TO_LIST_KEY[s.status]||'Active'));
+}
+
+/* ---- Admin Panel access — Coordinators/Teachers use a dedicated Teacher Portal (teacher-portal.html)
+   instead of this admin panel by default. Admin can grant an individual teacher full admin-panel access
+   as an exception via Access Control, which flips this same permission for just that user. */
+[1,2,3,4,6,7,8].forEach(roleId => DB.rolePermMatrix[roleId]["Users"]["AdminPanelAccess"] = true);
+// role 5 (Coordinator/Teacher) is intentionally left "false" (unset) — portal-only by default
+function canAccessAdminPanel(userId){ return effectivePerm(userId,'Users','AdminPanelAccess'); }
 
 DB.users = [
   { id:1, name:"Rafiul Islam", email:"rafiul@maktech.com.bd", phone:"01711223344", role_id:1, status:"active", avatarColor:"#ff6533" },
@@ -208,19 +299,105 @@ function sessionName(id){ const s=DB.sessions.find(x=>x.id===id); return s? s.na
 function sessionsForCourse(courseId){ return DB.sessions.filter(s=>s.course_id===courseId); }
 function batchesInSession(sessionId){ return DB.batches.filter(b=>b.session_id===sessionId); }
 
+/* ---------------- Labs / Classrooms (dynamic — created & capacity-managed by Admin) ----------------
+   Every batch is assigned to one lab; a batch's real capacity is always capped at the lab's capacity, and
+   every time a student is added to a batch (registration, additional enrollment, or self-enrollment
+   approval) the live seat count is checked against this cap — see canEnrollInBatch() below. */
+DB.labs = [
+  { id:1, name:"Lab-1", capacity:40, location:"Main Building, 2nd Floor", notes:"General-purpose computer lab", status:"active" },
+  { id:2, name:"Lab-2", capacity:35, location:"Main Building, 2nd Floor", notes:"Networking & systems lab", status:"active" },
+  { id:3, name:"Workshop-A", capacity:30, location:"Workshop Block", notes:"Electrical/PLC workshop", status:"active" },
+  { id:4, name:"Workshop-B", capacity:30, location:"Workshop Block", notes:"CNC/RAC workshop", status:"active" },
+  { id:5, name:"Drafting Hall", capacity:35, location:"Main Building, 1st Floor", notes:"AutoCAD/drafting hall", status:"active" },
+  { id:6, name:"Lab-3", capacity:30, location:"Main Building, 3rd Floor", notes:"Newly added — available for new batches", status:"active" },
+];
+function labById(id){ return DB.labs.find(l=>l.id===Number(id)); }
+function labName(id){ const l=labById(id); return l ? l.name : "—"; }
+function activeLabs(){ return DB.labs.filter(l=>l.status==='active'); }
+/* Batches currently (non-completed) assigned to this lab — used to warn admin before shrinking capacity. */
+function batchesUsingLab(labId, excludeBatchId){
+  return DB.batches.filter(b=>b.lab_id===Number(labId) && b.status!=='completed' && b.id!==excludeBatchId);
+}
+function createLab({name, capacity, location, notes}){
+  const lab = { id: nextId(DB.labs), name: (name||'').trim() || ('Lab-'+(DB.labs.length+1)), capacity: Math.max(1, Number(capacity)||1), location: location||'', notes: notes||'', status:'active' };
+  DB.labs.push(lab);
+  return lab;
+}
+function updateLab(id, {name, capacity, location, notes, status}){
+  const lab = labById(id); if(!lab) return null;
+  if(name!=null && name.trim()) lab.name = name.trim();
+  if(capacity!=null && !isNaN(Number(capacity))) lab.capacity = Math.max(1, Number(capacity));
+  if(location!=null) lab.location = location;
+  if(notes!=null) lab.notes = notes;
+  if(status!=null) lab.status = status;
+  return lab;
+}
+
 /* ---------------- Batches / Class Schedule ---------------- */
 DB.batches = [
-  { id:1, session_id:1, course_id:1, name:"Batch-26-A", start:"2026-06-01", end:"2026-08-30", coordinator_id:6, assigned_teachers:[6], capacity:40, enrolled:34, status:"ongoing", room:"Lab-1" },
-  { id:2, session_id:3, course_id:2, name:"Batch-26-B", start:"2026-06-10", end:"2026-08-24", coordinator_id:7, assigned_teachers:[7], capacity:35, enrolled:28, status:"ongoing", room:"Lab-2" },
-  { id:3, session_id:4, course_id:3, name:"Batch-26-C", start:"2026-05-15", end:"2026-08-13", coordinator_id:6, assigned_teachers:[6,7], capacity:30, enrolled:22, status:"ongoing", room:"Workshop-A" },
-  { id:4, session_id:5, course_id:4, name:"Batch-26-D", start:"2026-07-01", end:"2026-08-30", coordinator_id:7, assigned_teachers:[7], capacity:35, enrolled:19, status:"ongoing", room:"Drafting Hall" },
-  { id:5, session_id:6, course_id:5, name:"Batch-26-E", start:"2026-07-05", end:"2026-09-18", coordinator_id:6, assigned_teachers:[6], capacity:25, enrolled:15, status:"upcoming", room:"Workshop-B" },
-  { id:6, session_id:2, course_id:1, name:"Batch-25-Z", start:"2026-01-10", end:"2026-04-10", coordinator_id:6, assigned_teachers:[6], capacity:40, enrolled:38, status:"completed", room:"Lab-1" },
+  { id:1, session_id:1, course_id:1, name:"Batch-26-A", start:"2026-06-01", end:"2026-08-30", coordinator_id:6, assigned_teachers:[6], capacity:40, status:"ongoing", lab_id:1 },
+  { id:2, session_id:3, course_id:2, name:"Batch-26-B", start:"2026-06-10", end:"2026-08-24", coordinator_id:7, assigned_teachers:[7], capacity:35, status:"ongoing", lab_id:2 },
+  { id:3, session_id:4, course_id:3, name:"Batch-26-C", start:"2026-05-15", end:"2026-08-13", coordinator_id:6, assigned_teachers:[6,7], capacity:30, status:"ongoing", lab_id:3 },
+  { id:4, session_id:5, course_id:4, name:"Batch-26-D", start:"2026-07-01", end:"2026-08-30", coordinator_id:7, assigned_teachers:[7], capacity:35, status:"ongoing", lab_id:5 },
+  { id:5, session_id:6, course_id:5, name:"Batch-26-E", start:"2026-07-05", end:"2026-09-18", coordinator_id:6, assigned_teachers:[6], capacity:25, status:"upcoming", lab_id:4 },
+  { id:6, session_id:2, course_id:1, name:"Batch-25-Z", start:"2026-01-10", end:"2026-04-10", coordinator_id:6, assigned_teachers:[6], capacity:40, status:"completed", lab_id:1 },
 ];
 function batchName(id){ const b=DB.batches.find(x=>x.id===id); return b? b.name : "—"; }
+/* A batch's real usable capacity is always capped by whatever lab it's currently assigned to — if the lab's
+   capacity is later reduced below the batch's stored capacity, this live-clamps it everywhere it's shown. */
+function effectiveBatchCapacity(batch){
+  if(!batch) return 0;
+  const lab = labById(batch.lab_id);
+  return lab ? Math.min(batch.capacity, lab.capacity) : batch.capacity;
+}
+/* Live count of students actively enrolled in this batch — replaces the old static "enrolled" field so
+   every screen (dashboards, reports, portal) always reflects reality the moment a student is added/dropped. */
+function batchEnrolledCount(batchId){ return activeStudentsInBatch(batchId).length; }
+function batchSeatsAvailable(batchId){
+  const b = DB.batches.find(x=>x.id===Number(batchId)); if(!b) return 0;
+  return Math.max(0, effectiveBatchCapacity(b) - batchEnrolledCount(b.id));
+}
+/* Central guard used by every "add a student to a batch" flow (registration, additional-course override,
+   enrollment-request approval, portal self-enroll) so the lab-capacity limit is enforced consistently. */
+function canEnrollInBatch(batchId){
+  const b = DB.batches.find(x=>x.id===Number(batchId));
+  if(!b) return { ok:false, reason:'Batch not found.' };
+  const cap = effectiveBatchCapacity(b);
+  const taken = batchEnrolledCount(b.id);
+  const available = Math.max(0, cap - taken);
+  if(available<=0) return { ok:false, reason:`${b.name} is at full capacity (${taken}/${cap} — limited by ${labName(b.lab_id)}'s capacity of ${labById(b.lab_id)?.capacity ?? cap}).`, available, capacity:cap };
+  return { ok:true, available, capacity:cap };
+}
+function createBatch({sessionId, courseId, name, capacity, start, end, coordinatorId, labId, assignedTeachers, status}){
+  const lab = labById(labId);
+  const reqCap = Math.max(1, Number(capacity)||1);
+  const cap = lab ? Math.min(reqCap, lab.capacity) : reqCap;
+  const batch = {
+    id: nextId(DB.batches), session_id: Number(sessionId), course_id: Number(courseId),
+    name: (name||'').trim() || ('Batch-'+nextId(DB.batches)),
+    start: start||TODAY, end: end||TODAY, coordinator_id: coordinatorId?Number(coordinatorId):null,
+    assigned_teachers: assignedTeachers||[], capacity: cap, status: status||'upcoming', lab_id: lab?lab.id:null
+  };
+  DB.batches.push(batch);
+  return { batch, clamped: lab && reqCap>lab.capacity };
+}
 
 /* ---------------- Teacher/coordinator scoping helpers ---------------- */
 function isTeacherRole(userId){ const u=DB.users.find(x=>x.id===userId); return u && u.role_id===5; }
+function teacherUsers(){ return DB.users.filter(u=>u.role_id===5); }
+function teacherByPhone(phone){ return DB.users.find(u=>u.role_id===5 && u.phone===String(phone).trim()); }
+
+/* ---------------- Profile photo (Admin/staff users & Students — demo-only, kept in-memory as a data URL) ---------------- */
+function setUserPhoto(userId, dataUrl){
+  const u = DB.users.find(x=>x.id===userId); if(!u) return null;
+  u.photo = dataUrl || null;
+  return u;
+}
+function setStudentPhoto(studentId, dataUrl){
+  const s = DB.students.find(x=>x.id===studentId); if(!s) return null;
+  s.photo = dataUrl || null;
+  return s;
+}
 function scopedBatchesForUser(userId){
   const u = DB.users.find(x=>x.id===userId);
   if(!u) return [];
@@ -251,6 +428,132 @@ DB.classSchedule = [
   { id:7, batch_id:3, module_id:10, teacher_id:6, date:"2026-08-08", start:"15:00", end:"17:00", room:"Workshop-A", mode:"physical" },
   { id:8, batch_id:1, module_id:3, teacher_id:6, date:"2026-08-08", start:"10:00", end:"12:00", room:"Lab-1", mode:"physical" },
 ];
+
+/* ============================================================
+   Teacher Payments — per-batch pay rates & disbursement ledger.
+   Every teacher/coordinator assigned to a batch (DB.batches[].assigned_teachers) can have a pay RATE set
+   for that specific batch (a teacher may be paid differently on different batches). The rate determines
+   how much has been "earned" so far (computeEarnedForTeacherBatch) — this is purely informational/suggested,
+   NOT an auto-payment. Admin/Accountant still explicitly raises a payment request against that rate, which
+   then goes through the same raise → approve → disburse lifecycle used elsewhere in this app (Expenses,
+   Cash Management), producing a signed/printable voucher at the end.
+   ============================================================ */
+const PAY_RATE_TYPE_LABELS = { fixed:"Fixed (Lump Sum)", per_session:"Per Class Held", per_hour:"Per Hour Taught" };
+DB.teacherPayRates = [
+  { id:1, teacher_id:6, batch_id:1, rate_type:"per_session", rate_amount:800, notes:"" },
+  { id:2, teacher_id:7, batch_id:2, rate_type:"fixed", rate_amount:25000, notes:"Negotiated lump sum for the full batch duration." },
+  { id:3, teacher_id:6, batch_id:3, rate_type:"per_hour", rate_amount:400, notes:"Shared batch — paid per hour actually taught." },
+  { id:4, teacher_id:7, batch_id:3, rate_type:"fixed", rate_amount:15000, notes:"Shared batch — co-teacher's negotiated lump sum." },
+  { id:5, teacher_id:7, batch_id:4, rate_type:"per_session", rate_amount:700, notes:"" },
+  { id:6, teacher_id:6, batch_id:5, rate_type:"per_session", rate_amount:750, notes:"Batch not yet started — no classes held so nothing earned yet." },
+  { id:7, teacher_id:6, batch_id:6, rate_type:"fixed", rate_amount:22000, notes:"Batch completed — fully settled." },
+];
+function payRateFor(teacherId, batchId){ return DB.teacherPayRates.find(r=>r.teacher_id===teacherId && r.batch_id===batchId) || null; }
+function payRatesForBatch(batchId){ return DB.teacherPayRates.filter(r=>r.batch_id===batchId); }
+function setPayRate(teacherId, batchId, rateType, rateAmount, notes){
+  let r = payRateFor(teacherId, batchId);
+  if(r){ r.rate_type = rateType; r.rate_amount = rateAmount; r.notes = notes||''; }
+  else { r = { id: nextId(DB.teacherPayRates), teacher_id: teacherId, batch_id: batchId, rate_type: rateType, rate_amount: rateAmount, notes: notes||'' }; DB.teacherPayRates.push(r); }
+  return r;
+}
+/* Every batch+teacher pair that should show up on the Teacher Payments screen — every assigned-teacher
+   relationship from DB.batches, whether or not a rate has been set yet (shows as "No rate set"). */
+function teacherBatchPairs(batchIds){
+  const ids = batchIds || DB.batches.map(b=>b.id);
+  return DB.batches.filter(b=>ids.includes(b.id)).flatMap(b => (b.assigned_teachers||[]).map(tid => ({ teacher_id: tid, batch_id: b.id })));
+}
+/* Classes actually held BY this teacher for this batch — sourced from real attendanceSessions (the same
+   record used for attendance reporting), so "Per Class Held" pay is grounded in genuine class-conduct data. */
+function sessionsHeldByTeacherForBatch(teacherId, batchId){
+  return DB.attendanceSessions.filter(s=>s.batch_id===batchId && s.marked_by===teacherId);
+}
+/* Hours taught — derived from this teacher's real class-schedule blocks for the batch. */
+function hoursTaughtByTeacherForBatch(teacherId, batchId){
+  return sum(DB.classSchedule.filter(c=>c.batch_id===batchId && c.teacher_id===teacherId), c=>{
+    const [sh,sm] = c.start.split(':').map(Number), [eh,em] = c.end.split(':').map(Number);
+    return Math.max(0, ((eh*60+em) - (sh*60+sm)) / 60);
+  });
+}
+/* What this teacher has EARNED so far for this batch, per their rate type. Purely computed/informational —
+   independent of what has actually been requested/approved/paid (see DB.teacherPayments below). */
+function computeEarnedForTeacherBatch(teacherId, batchId){
+  const rate = payRateFor(teacherId, batchId); if(!rate) return 0;
+  if(rate.rate_type==='fixed') return rate.rate_amount;
+  if(rate.rate_type==='per_session') return rate.rate_amount * sessionsHeldByTeacherForBatch(teacherId, batchId).length;
+  if(rate.rate_type==='per_hour') return Math.round(rate.rate_amount * hoursTaughtByTeacherForBatch(teacherId, batchId));
+  return 0;
+}
+
+/* ---------------- Teacher payment requests / disbursement ledger ---------------- */
+const TEACHER_PAY_TYPE_LABELS = { lump_sum:"Lump Sum", installment:"Installment", bonus:"Bonus", adjustment:"Adjustment" };
+function generateTeacherPayVoucherNo(){ return "TPV-2026-" + String(DB.teacherPayments.length+1).padStart(4,'0'); }
+DB.teacherPayments = [
+  { id:1, teacher_id:6, batch_id:6, type:"lump_sum", period_label:"Batch-25-Z — Full Settlement", computed_amount:22000, amount:22000,
+    status:"paid", requested_by:2, requested_date:"2026-04-12", approved_by:2, approved_date:"2026-04-13",
+    paid_by:5, paid_date:"2026-04-15", payment_method:"bank", txn_ref:"DBBL-TCH-88213", voucher_no:"TPV-2026-0001",
+    notes:"Final settlement after batch completion & certificate ceremony." },
+  { id:2, teacher_id:6, batch_id:1, type:"installment", period_label:"July 2026", computed_amount:9600, amount:9600,
+    status:"paid", requested_by:2, requested_date:"2026-08-01", approved_by:2, approved_date:"2026-08-01",
+    paid_by:5, paid_date:"2026-08-02", payment_method:"bkash", txn_ref:"TPBKS-9911", voucher_no:"TPV-2026-0002",
+    notes:"12 classes held in July @ ৳800/class." },
+  { id:3, teacher_id:7, batch_id:2, type:"lump_sum", period_label:"Batch-26-B — 50% Advance", computed_amount:25000, amount:12500,
+    status:"pending", requested_by:2, requested_date:"2026-08-05", approved_by:null, approved_date:null,
+    paid_by:null, paid_date:null, payment_method:null, txn_ref:null, voucher_no:"TPV-2026-0003",
+    notes:"Advance requested per teacher agreement — remaining 50% due on batch completion." },
+  { id:4, teacher_id:6, batch_id:3, type:"installment", period_label:"August 2026 (part-month)", computed_amount:2400, amount:2400,
+    status:"approved", requested_by:2, requested_date:"2026-08-04", approved_by:2, approved_date:"2026-08-05",
+    paid_by:null, paid_date:null, payment_method:null, txn_ref:null, voucher_no:"TPV-2026-0004",
+    notes:"6 hours taught so far in August @ ৳400/hr — approved, awaiting disbursement." },
+  { id:5, teacher_id:7, batch_id:4, type:"bonus", period_label:"Performance Bonus", computed_amount:0, amount:3000,
+    status:"rejected", requested_by:2, requested_date:"2026-07-30", approved_by:2, approved_date:"2026-07-31",
+    paid_by:null, paid_date:null, payment_method:null, txn_ref:null, voucher_no:"TPV-2026-0005",
+    rejection_reason:"Bonus pool not approved for this session — resubmit next quarter.", notes:"" },
+];
+function teacherPaymentsForBatch(batchId){ return DB.teacherPayments.filter(p=>p.batch_id===batchId); }
+function teacherPaymentsForTeacher(teacherId){ return DB.teacherPayments.filter(p=>p.teacher_id===teacherId); }
+function teacherPaymentsScopedForUser(userId){
+  if(!isTeacherRole(userId)) return DB.teacherPayments;
+  return DB.teacherPayments.filter(p=>p.teacher_id===userId);
+}
+function totalPaidToTeacherForBatch(teacherId, batchId){ return sum(DB.teacherPayments.filter(p=>p.teacher_id===teacherId && p.batch_id===batchId && p.status==='paid'), p=>p.amount); }
+function totalInFlightForTeacherBatch(teacherId, batchId){ return sum(DB.teacherPayments.filter(p=>p.teacher_id===teacherId && p.batch_id===batchId && (p.status==='pending'||p.status==='approved')), p=>p.amount); }
+function outstandingForTeacherBatch(teacherId, batchId){ return Math.max(0, computeEarnedForTeacherBatch(teacherId, batchId) - totalPaidToTeacherForBatch(teacherId, batchId)); }
+/* Count relevant to the current user for the sidebar badge — teachers only ever see their OWN pending
+   requests (informational; they can't approve), everyone else sees the org-wide pending-approval queue. */
+function pendingTeacherPaymentsCountForUser(userId){
+  if(isTeacherRole(userId)) return DB.teacherPayments.filter(p=>p.teacher_id===userId && p.status==='pending').length;
+  return DB.teacherPayments.filter(p=>p.status==='pending').length;
+}
+function requestTeacherPayment({teacherId, batchId, type, periodLabel, amount, computedAmount, notes, requestedBy}){
+  const rec = {
+    id: nextId(DB.teacherPayments), teacher_id: teacherId, batch_id: batchId, type: type||'lump_sum',
+    period_label: periodLabel || '', computed_amount: computedAmount||0, amount: Number(amount)||0,
+    status: "pending", requested_by: requestedBy||null, requested_date: TODAY,
+    approved_by: null, approved_date: null, paid_by: null, paid_date: null, payment_method: null, txn_ref: null,
+    voucher_no: generateTeacherPayVoucherNo(), notes: notes||''
+  };
+  DB.teacherPayments.push(rec);
+  DB.auditLogs.push({ id:nextId(DB.auditLogs), user_id:requestedBy, module:"teacher_payment", action:"create", record:`${rec.voucher_no} — ${fmtMoney(rec.amount)} requested for ${userName(teacherId)} (${batchName(batchId)})`, date: TODAY+" "+new Date().toTimeString().slice(0,5) });
+  return rec;
+}
+function approveTeacherPayment(id, approverId){
+  const p = DB.teacherPayments.find(x=>x.id===id); if(!p || p.status!=='pending') return null;
+  p.status = "approved"; p.approved_by = approverId; p.approved_date = TODAY;
+  DB.auditLogs.push({ id:nextId(DB.auditLogs), user_id:approverId, module:"teacher_payment", action:"approve", record:`${p.voucher_no} — ${fmtMoney(p.amount)} approved for ${userName(p.teacher_id)} (${batchName(p.batch_id)})`, date: TODAY+" "+new Date().toTimeString().slice(0,5) });
+  return p;
+}
+function rejectTeacherPayment(id, approverId, reason){
+  const p = DB.teacherPayments.find(x=>x.id===id); if(!p || p.status!=='pending') return null;
+  p.status = "rejected"; p.approved_by = approverId; p.approved_date = TODAY; p.rejection_reason = reason || 'Not approved';
+  DB.auditLogs.push({ id:nextId(DB.auditLogs), user_id:approverId, module:"teacher_payment", action:"reject", record:`${p.voucher_no} — request for ${userName(p.teacher_id)} (${batchName(p.batch_id)}) rejected: ${p.rejection_reason}`, date: TODAY+" "+new Date().toTimeString().slice(0,5) });
+  return p;
+}
+function markTeacherPaymentPaid(id, {paidBy, method, txnRef}){
+  const p = DB.teacherPayments.find(x=>x.id===id); if(!p || p.status!=='approved') return null;
+  p.status = "paid"; p.paid_by = paidBy||null; p.paid_date = TODAY; p.payment_method = method||'cash'; p.txn_ref = txnRef||null;
+  DB.auditLogs.push({ id:nextId(DB.auditLogs), user_id:paidBy, module:"teacher_payment", action:"paid", record:`${p.voucher_no} — ${fmtMoney(p.amount)} disbursed to ${userName(p.teacher_id)} (${batchName(p.batch_id)}) via ${method}`, date: TODAY+" "+new Date().toTimeString().slice(0,5) });
+  return p;
+}
 
 /* ---------------- Leads & CRM ---------------- */
 const LEAD_STATUS_LABELS = {new:'New', contacted:'Contacted', interested:'Interested', visited:'Visited', negotiation:'Negotiation', admitted:'Admitted', lost:'Lost'};
@@ -437,6 +740,18 @@ const STUDENT_STATUS_LABELS = {prospect:'Prospect', admitted:'Admitted', active:
 function primaryEnrollment(student){ return student.courses.find(c=>c.type==='primary') || student.courses[0]; }
 function additionalEnrollments(student){ return student.courses.filter(c=>c.type==='additional'); }
 
+/* Manual student status change — gated behind Students.ChangeStatus permission (see app.js action handlers). */
+function changeStudentStatus(studentId, newStatus, reason, changedBy){
+  const s = studentById(studentId); if(!s || !STUDENT_STATUS_LABELS[newStatus]) return null;
+  const old = s.status;
+  if(old===newStatus) return s;
+  s.status = newStatus;
+  DB.auditLogs.push({ id:nextId(DB.auditLogs), user_id:changedBy||null, module:"student", action:"status_change",
+    record:`${s.name} (${s.code}): ${STUDENT_STATUS_LABELS[old]} → ${STUDENT_STATUS_LABELS[newStatus]}${reason?' — '+reason:''}`,
+    date: TODAY+" "+new Date().toTimeString().slice(0,5) });
+  return s;
+}
+
 DB.moduleProgress = [
   { student_id:1, module_id:1, status:"completed" }, { student_id:1, module_id:2, status:"in_progress" }, { student_id:1, module_id:3, status:"not_started" }, { student_id:1, module_id:4, status:"not_started" },
   { student_id:6, module_id:9, status:"completed" }, { student_id:6, module_id:10, status:"in_progress" }, { student_id:6, module_id:11, status:"not_started" }, { student_id:6, module_id:12, status:"not_started" },
@@ -569,6 +884,22 @@ DB.feeInvoices = [
 ];
 function invoiceForStudent(sid){ return DB.feeInvoices.find(x=>x.student_id===sid); }
 
+/* Manual invoice status override — gated behind Payments.ChangeStatus permission. Meant for corrections /
+   write-offs / cancellations; normal collections should go through recordPayment() instead. */
+const INVOICE_STATUSES = ['due','partial','paid','overdue','cancelled'];
+function changeInvoiceStatus(invoiceId, newStatus, reason, changedBy){
+  const inv = DB.feeInvoices.find(x=>x.id===invoiceId); if(!inv || !INVOICE_STATUSES.includes(newStatus)) return null;
+  const old = inv.status;
+  if(old===newStatus) return inv;
+  if(newStatus==='paid'){ inv.paid = inv.total; inv.due = 0; }
+  else if(newStatus==='cancelled'){ inv.due = 0; }
+  inv.status = newStatus;
+  DB.auditLogs.push({ id:nextId(DB.auditLogs), user_id:changedBy||null, module:"payment", action:"status_change",
+    record:`Invoice ${inv.invoice_no}: ${old} → ${newStatus}${reason?' — '+reason:''}`,
+    date: TODAY+" "+new Date().toTimeString().slice(0,5) });
+  return inv;
+}
+
 DB.paymentInstallments = [
   { id:1, invoice_id:2, no:1, amount:8000, due_date:"2026-06-10", status:"paid" },
   { id:2, invoice_id:2, no:2, amount:8000, due_date:"2026-08-10", status:"pending" },
@@ -697,6 +1028,22 @@ function selfRegisterStudent({name, phone, email}){
   };
   DB.students.push(student);
   return student;
+}
+
+/* Staff-assisted registration (Students → Register Student form) — creates the student record AND their
+   primary enrollment + invoice in one go. Capacity should already have been checked by the caller via
+   canEnrollInBatch() before calling this, so the batch's lab-capacity limit is never bypassed. */
+function registerStudentWithEnrollment({name, dob, gender, nid, phone, email, presentAddress, permanentAddress, institutionId, roll, guardianName, guardianPhone, courseId, batchId}){
+  const student = {
+    id: nextId(DB.students), code: generateStudentCode(), name, dob:dob||"", gender:gender||"", nid:nid||"", phone,
+    email: email||null, present_address:presentAddress||"", permanent_address:permanentAddress||"", photo:null,
+    institution_id: institutionId?Number(institutionId):null, roll:roll||"", passing_year:"",
+    guardian_name:guardianName||"", guardian_relation:"", guardian_phone:guardianPhone||"", status:"active",
+    profile_completed:true, lead_id:null, created_by:null, courses:[], documents:[]
+  };
+  DB.students.push(student);
+  const { enrollment, invoice } = createEnrollment(student, Number(courseId), Number(batchId), { paidNow:false });
+  return { student, enrollment, invoice };
 }
 
 function pendingEnrollmentRequest(studentId){ return DB.enrollmentRequests.find(r=>r.student_id===studentId && r.status==='pending'); }
@@ -894,4 +1241,8 @@ const KPI = {
   avgAttendance: () => { const s = allBatchAttendanceSummaries(); return s.length ? Math.round(sum(s, b=>b.avgPct) / s.length) : 0; },
   upcomingClasses: () => DB.classSchedule.filter(c=>c.date>='2026-08-06').length,
   expiringInstallments: () => DB.paymentInstallments.filter(i=>i.status==='pending' || i.status==='overdue').length,
+  teacherPaymentsPendingApproval: () => DB.teacherPayments.filter(p=>p.status==='pending').length,
+  teacherPaymentsAwaitingDisbursement: () => DB.teacherPayments.filter(p=>p.status==='approved').length,
+  teacherPaymentsPaidYTD: () => sum(DB.teacherPayments.filter(p=>p.status==='paid'), p=>p.amount),
+  teacherPayablesOutstanding: () => sum(teacherBatchPairs(), pair => outstandingForTeacherBatch(pair.teacher_id, pair.batch_id)),
 };

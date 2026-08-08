@@ -4,19 +4,30 @@
 
 let PORTAL_STUDENT_ID = 1;
 
+/* Grouped sidebar nav (mirrors the Admin Panel's collapsible NAV/buildSidebar pattern in js/app.js) —
+   new pages just slot into an existing group (or a new one), so the header never has to grow again. */
 const PORTAL_NAV = [
-  { id:'dashboard', label:'Dashboard', ic:'home' },
-  { id:'browse', label:'Browse Courses', ic:'course' },
-  { id:'course', label:'My Course', ic:'bookOpen' },
-  { id:'attendance', label:'Attendance', ic:'attendance' },
-  { id:'payments', label:'Payments', ic:'payment' },
-  { id:'migration', label:'Migration', ic:'swap' },
-  { id:'certificate', label:'Certificate', ic:'certificate' },
-  { id:'idcard', label:'ID Card', ic:'idcard' },
-  { id:'notifications', label:'Notifications', ic:'notification' },
-  { id:'support', label:'Support', ic:'ticket' },
-  { id:'profile', label:'Profile', ic:'user' },
+  { id:'grp-dashboard', label:'Dashboard', ic:'dashboard', items:[
+    { id:'dashboard', label:'Dashboard', ic:'home', sub:"Here's what's happening with your enrollment today" },
+  ]},
+  { id:'grp-learning', label:'My Learning', ic:'bookOpen', items:[
+    { id:'browse', label:'Browse Courses', ic:'course', sub:'Pick a session & batch, then pay online or request enrollment' },
+    { id:'course', label:'My Course', ic:'bookOpen', sub:'Module-by-module progress for your enrolled course' },
+    { id:'attendance', label:'Attendance', ic:'attendance', sub:'Your session-wise attendance record' },
+    { id:'migration', label:'Migration', ic:'swap', sub:'Request to transfer to a different course or batch' },
+  ]},
+  { id:'grp-finance', label:'Finance & Documents', ic:'payment', items:[
+    { id:'payments', label:'Payments', ic:'payment', sub:'Fee invoice, due amount & payment history', count:()=>{ const inv = pInvoice(); return inv && inv.due>0 ? 1 : 0; } },
+    { id:'certificate', label:'Certificate', ic:'certificate', sub:'Download your QR-verifiable certificate' },
+    { id:'idcard', label:'ID Card', ic:'idcard', sub:'Your digital student ID card' },
+  ]},
+  { id:'grp-account', label:'Account', ic:'user', items:[
+    { id:'notifications', label:'Notifications', ic:'notification', sub:'SMS / Email / Portal messages sent to you' },
+    { id:'support', label:'Support', ic:'ticket', sub:'Raise a ticket or contact the office' },
+    { id:'profile', label:'Profile', ic:'user', sub:'Personal information & documents' },
+  ]},
 ];
+let expandedPortalGroupId = 'grp-dashboard';
 
 const PORTAL_VIEWS = {
   dashboard: renderPortalDashboard,
@@ -51,7 +62,7 @@ function portalLogin(studentId){
   const s = pStudent();
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('portalShell').style.display = 'flex';
-  document.getElementById('portalAvatar').textContent = initials(s.name);
+  paintAvatarEl(document.getElementById('portalAvatar'), s.name, s.photo);
   document.getElementById('portalUserName').textContent = s.name;
   document.getElementById('portalUserCode').textContent = s.code;
   buildPortalNav();
@@ -59,17 +70,64 @@ function portalLogin(studentId){
   portalNavigate('dashboard');
 }
 
+function portalGroupForView(viewId){ return PORTAL_NAV.find(g=>g.items.some(it=>it.id===viewId)); }
+function portalNavItem(viewId){ return PORTAL_NAV.flatMap(g=>g.items).find(it=>it.id===viewId); }
+
 function buildPortalNav(){
-  const html = PORTAL_NAV.map(n=>`<div class="pnav-item" data-action="pgo" data-pview="${n.id}">${icon(n.ic)} <span>${n.label}</span></div>`).join('');
-  document.getElementById('portalNav').innerHTML = html;
-  document.getElementById('portalNavMobile').innerHTML = html;
+  const root = document.getElementById('portalNav');
+  root.innerHTML = PORTAL_NAV.map(g=>{
+    const items = g.items;
+    const hasActive = items.some(it=>it.id===portalCurrentView);
+    if(items.length===1){
+      const it = items[0];
+      return `<div class="nav-group">
+        <div class="nav-item ${it.id===portalCurrentView?'active':''}" data-action="pgo" data-pview="${it.id}">
+          ${icon(it.ic)}<span>${it.label}</span>
+        </div>
+      </div>`;
+    }
+    const expanded = expandedPortalGroupId===g.id;
+    const totalCount = items.reduce((sum,it)=> sum + (it.count ? it.count() : 0), 0);
+    return `<div class="nav-group">
+      <div class="nav-section ${expanded?'expanded':''}">
+        <div class="nav-group-header ${hasActive?'has-active':''}" data-action="toggle-portal-nav-group" data-group="${g.id}">
+          ${icon(g.ic)}<span>${g.label}</span>
+          ${totalCount ? `<span class="badge-count">${totalCount}</span>` : ''}
+          ${icon('chevronRight','chev')}
+        </div>
+        <div class="nav-submenu">
+          ${items.map(it=>`
+            <div class="nav-item sub ${it.id===portalCurrentView?'active':''}" data-action="pgo" data-pview="${it.id}">
+              ${icon(it.ic)}
+              <span>${it.label}</span>
+              ${it.count && it.count() ? `<span class="badge-count">${it.count()}</span>` : ''}
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function portalNavigate(view){
   portalCurrentView = view;
-  document.querySelectorAll('.pnav-item').forEach(el=> el.classList.toggle('active', el.dataset.pview===view));
+  const grp = portalGroupForView(view);
+  if(grp && grp.items.length>1) expandedPortalGroupId = grp.id;
+  buildPortalNav();
+  const it = portalNavItem(view);
+  document.getElementById('portalPageTitle').textContent = it ? it.label : 'Not Found';
+  document.getElementById('portalPageSub').textContent = it ? (it.sub||'') : '';
   document.getElementById('portalContent').innerHTML = PORTAL_VIEWS[view] ? PORTAL_VIEWS[view]() : '<p>Not found</p>';
   window.scrollTo({top:0, behavior:'instant'});
+  document.getElementById('portalSidebar').classList.remove('show');
+  document.getElementById('portalSidebarScrim').classList.remove('show');
+  if(view==='profile'){
+    wireProfilePhotoInput('pProfilePhotoInput', (dataUrl)=>{
+      setStudentPhoto(PORTAL_STUDENT_ID, dataUrl);
+      paintAvatarEl(document.getElementById('portalAvatar'), pStudent().name, dataUrl);
+      portalRefresh();
+      toast('Profile photo updated');
+    });
+  }
 }
 function portalRefresh(){ portalNavigate(portalCurrentView); }
 
@@ -202,7 +260,10 @@ function updateEnrollBatchOptions(){
   const sessSel = document.getElementById('enrollSessionSelect'); const batchSel = document.getElementById('enrollBatchSelect');
   if(!sessSel || !batchSel) return;
   const batches = batchesInSession(Number(sessSel.value)).filter(b=>b.status!=='completed');
-  batchSel.innerHTML = batches.map(b=>`<option value="${b.id}">${b.name} — ${b.enrolled}/${b.capacity} enrolled · ${b.room}</option>`).join('') || '<option value="">No open batches in this session</option>';
+  batchSel.innerHTML = batches.map(b=>{
+    const seatsLeft = batchSeatsAvailable(b.id);
+    return `<option value="${b.id}" ${seatsLeft<=0?'disabled':''}>${b.name} — ${batchEnrolledCount(b.id)}/${effectiveBatchCapacity(b)} enrolled · ${labName(b.lab_id)}${seatsLeft<=0?' (FULL)':''}</option>`;
+  }).join('') || '<option value="">No open batches in this session</option>';
 }
 let selectedEnrollPayOption = 'online';
 function selectEnrollPayOption(opt){
@@ -214,6 +275,8 @@ function portalSubmitEnrollment(courseId){
   const sessionId = Number(document.getElementById('enrollSessionSelect')?.value);
   const batchId = Number(document.getElementById('enrollBatchSelect')?.value);
   if(!batchId){ toast('Please choose a batch with open seats', 'error'); return; }
+  const cap = canEnrollInBatch(batchId);
+  if(!cap.ok){ toast(cap.reason || 'This batch is full — please choose another batch.', 'error'); updateEnrollBatchOptions(); return; }
   closeModal();
   if(selectedEnrollPayOption==='online'){
     const { invoice, payment } = createEnrollment(s, Number(courseId), batchId, { paidNow:true, method:'bkash' });
@@ -474,11 +537,9 @@ function renderPortalProfile(){
   </div>
   <div class="grid grid-3" style="align-items:start;">
     <div class="card card-pad" style="text-align:center;">
-      ${avatarHtml(s.name,'lg')}
+      ${profilePhotoBlockHtml(s.name, s.photo, {inputId:'pProfilePhotoInput', previewId:'pProfilePhotoPreview', removeAction:'p-remove-photo'})}
       <b style="display:block;margin:12px 0 2px;font-size:15px;">${s.name}</b>
       <span class="cell-sub">${s.code}</span>
-      <div class="hr"></div>
-      <button class="btn btn-secondary btn-sm btn-block">${icon('upload')} Change Photo</button>
     </div>
     <div class="card card-pad" style="grid-column:span 2;">
       <div class="form-grid">
@@ -529,9 +590,14 @@ document.addEventListener('click', function(e){
   }
   switch(t.dataset.action){
     case 'pgo': portalNavigate(t.dataset.pview); break;
+    case 'toggle-portal-nav-group':
+      expandedPortalGroupId = (expandedPortalGroupId===t.dataset.group) ? null : t.dataset.group;
+      buildPortalNav();
+      break;
     case 'pgo-enroll': portalEnrollModal(t.dataset.courseid); break;
     case 'portal-submit-enrollment': portalSubmitEnrollment(t.dataset.courseid); break;
     case 'view-receipt': receiptPreviewModal(Number(t.dataset.id)); break;
+    case 'p-remove-photo': setStudentPhoto(PORTAL_STUDENT_ID, null); paintAvatarEl(document.getElementById('portalAvatar'), pStudent().name, null); portalRefresh(); toast('Profile photo removed'); break;
   }
 });
 
@@ -558,6 +624,15 @@ document.addEventListener('DOMContentLoaded', function(){
     toast('Logged out successfully');
   });
   document.getElementById('portalBell').addEventListener('click', ()=> portalNavigate('notifications'));
+  document.getElementById('btnPortalHamburger').innerHTML = icon('menu');
+  document.getElementById('btnPortalHamburger').addEventListener('click', ()=>{
+    document.getElementById('portalSidebar').classList.toggle('show');
+    document.getElementById('portalSidebarScrim').classList.toggle('show');
+  });
+  document.getElementById('portalSidebarScrim').addEventListener('click', ()=>{
+    document.getElementById('portalSidebar').classList.remove('show');
+    document.getElementById('portalSidebarScrim').classList.remove('show');
+  });
 
   document.getElementById('btnShowLogin').addEventListener('click', ()=> showAuthPane('login'));
   document.getElementById('btnShowSignup').addEventListener('click', ()=> showAuthPane('signup'));

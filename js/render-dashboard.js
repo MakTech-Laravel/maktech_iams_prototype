@@ -53,6 +53,12 @@ function dashboardAdmin(){
     ${kpiCard('clock','Enrollment Requests Pending', DB.enrollmentRequests.filter(r=>r.status==='pending').length, null, '#f59e0b')}
     ${kpiCard('expense','Total Expense (YTD)', fmtMoney(sum(DB.expenses,e=>e.amount)), 5, '#f43f5e')}
   </div>
+  <div class="grid grid-4" style="margin-bottom:24px;">
+    ${kpiCard('graduationCap','Teacher Payments Pending Approval', KPI.teacherPaymentsPendingApproval(), null, '#f59e0b')}
+    ${kpiCard('wallet','Teacher Payables Outstanding', fmtMoney(KPI.teacherPayablesOutstanding()), null, KPI.teacherPayablesOutstanding()>0?'#ef4444':'#10b981')}
+    ${kpiCard('checkCircle','Awaiting Disbursement', KPI.teacherPaymentsAwaitingDisbursement(), null, '#3b82f6')}
+    ${kpiCard('graduationCap','Teacher Payments (YTD)', fmtMoney(KPI.teacherPaymentsPaidYTD()), null, '#10b981')}
+  </div>
 
   <div class="grid grid-3" style="align-items:start;">
     <div class="card" style="grid-column:span 2;">
@@ -177,6 +183,12 @@ function dashboardFinance(){
     ${overdue.map(i=>`<tr><td class="cell-strong">${i.invoice_no}</td><td>${studentName(i.student_id)}</td><td>${fmtMoney(i.total)}</td><td>${fmtMoney(i.due)}</td><td>${fmtDate(i.due_date)}</td><td>${statusBadge(i.status)}</td></tr>`).join('')}
     </tbody></table></div>
   </div>
+  <div class="card mt-16">
+    <div class="card-header"><div><h3>Teacher Payments Awaiting Disbursement</h3><p>Approved but not yet paid out</p></div><button class="btn btn-sm btn-outline" data-action="go-view" data-view="teacher-payments">${icon('graduationCap')} Open Teacher Payments</button></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Voucher</th><th>Teacher</th><th>Batch</th><th>Amount</th><th>Approved</th><th></th></tr></thead><tbody>
+    ${DB.teacherPayments.filter(p=>p.status==='approved').map(p=>`<tr><td class="cell-strong">${p.voucher_no}</td><td>${userName(p.teacher_id)}</td><td>${batchName(p.batch_id)}</td><td>${fmtMoney(p.amount)}</td><td>${fmtDate(p.approved_date)}</td><td><button class="btn btn-sm btn-primary" data-action="open-pay-teacher-payment" data-id="${p.id}">${icon('wallet')} Pay Now</button></td></tr>`).join('') || `<tr><td colspan="6" class="muted">Nothing awaiting disbursement right now.</td></tr>`}
+    </tbody></table></div>
+  </div>
   `;
 }
 
@@ -188,12 +200,16 @@ function dashboardCoordinator(){
   const mySummaries = allBatchAttendanceSummaries(myBatchIds);
   const myAvgAtt = mySummaries.length ? Math.round(sum(mySummaries, s=>s.avgPct)/mySummaries.length) : 0;
   const myLow = lowAttendanceStudents(70, myBatchIds);
+  const myPairs = teacherBatchPairs(myBatchIds).filter(pr=>pr.teacher_id===uid);
+  const myEarned = sum(myPairs, pr=>computeEarnedForTeacherBatch(pr.teacher_id, pr.batch_id));
+  const myPaid = sum(myPairs, pr=>totalPaidToTeacherForBatch(pr.teacher_id, pr.batch_id));
+  const myOutstanding = sum(myPairs, pr=>outstandingForTeacherBatch(pr.teacher_id, pr.batch_id));
   return `
   <div class="view-header"><div><h1>Coordinator Dashboard</h1><p>Your classes, attendance & module progress — ${u?u.name:''}</p></div></div>
   <div class="badge badge-amber" style="margin-bottom:16px;">${icon('shield')} You only see the batches assigned to you by an Admin (Access Control).</div>
   <div class="grid grid-4" style="margin-bottom:22px;">
     ${kpiCard('batch','My Active Batches', myBatches.filter(b=>b.status==='ongoing').length, null, '#ff6533')}
-    ${kpiCard('students','Students Under Supervision', sum(myBatches,b=>b.enrolled), null, '#06b6d4')}
+    ${kpiCard('students','Students Under Supervision', sum(myBatches,b=>batchEnrolledCount(b.id)), null, '#06b6d4')}
     ${kpiCard('attendance','Avg Attendance (My Batches)', myAvgAtt+'%', null, myAvgAtt<70?'#ef4444':'#10b981')}
     ${kpiCard('calendar','Classes Today', DB.classSchedule.filter(c=>myBatchIds.includes(c.batch_id) && c.date==='2026-08-06').length, null, '#f59e0b')}
   </div>
@@ -209,6 +225,14 @@ function dashboardCoordinator(){
       <div class="card-pad">
         ${myLow.length ? myLow.slice(0,6).map(l=>`<div class="flex-between" style="margin-bottom:10px;font-size:12.5px;"><span>${l.student.name}</span>${statusBadge('absent',l.pct+'%')}</div>`).join('') : `<p class="muted" style="font-size:12.5px;">No students below 70% — great job!</p>`}
       </div>
+    </div>
+  </div>
+  <div class="card mt-16">
+    <div class="card-header"><div><h3>My Batch Payments</h3><p>Earnings & payout status across your assigned batches</p></div><button class="btn btn-sm btn-outline" data-action="go-view" data-view="teacher-payments">${icon('graduationCap')} View Details</button></div>
+    <div class="grid grid-3 card-pad" style="gap:14px;">
+      <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;">${fmtMoney(myEarned)}</div><div class="cell-sub">Total Earned</div></div>
+      <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;color:var(--success-700);">${fmtMoney(myPaid)}</div><div class="cell-sub">Total Paid</div></div>
+      <div class="card card-pad" style="text-align:center;"><div style="font-size:18px;font-weight:800;color:${myOutstanding>0?'var(--danger-600)':'var(--gray-400)'};">${fmtMoney(myOutstanding)}</div><div class="cell-sub">Outstanding</div></div>
     </div>
   </div>
   `;

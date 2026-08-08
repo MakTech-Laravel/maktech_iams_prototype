@@ -15,7 +15,7 @@
 <body>
 
 <div class="prototype-banner">🧪 <b>Visual Prototype</b> — click-through demo, no real backend. Data resets on refresh. &nbsp;|&nbsp;
-  <a href="portal.html">Open Student Portal ↗</a> &nbsp;|&nbsp; <a href="verify.html">Open Certificate Verify Page ↗</a>
+  <a href="portal.html">Open Student Portal ↗</a> &nbsp;|&nbsp; <a href="teacher-portal.html">Open Teacher Portal ↗</a> &nbsp;|&nbsp; <a href="verify.html">Open Certificate Verify Page ↗</a>
 </div>
 
 <div class="app-shell">
@@ -64,7 +64,7 @@
           </select>
         </div>
         <button class="icon-btn" id="btnNotif"><span class="dot"></span><span id="bellIcon"></span></button>
-        <div class="user-chip" id="userChip">
+        <div class="user-chip" id="userChip" data-action="open-my-profile" style="cursor:pointer;" title="My Profile">
           <div class="avatar sm">RI</div>
           <div class="who">
             <b>Rafiul Islam</b>
@@ -118,6 +118,7 @@
 <script src="js/render-academic.js"></script>
 <script src="js/render-students.js"></script>
 <script src="js/render-finance.js"></script>
+<script src="js/render-teacherpay.js"></script>
 <script src="js/render-certificates.js"></script>
 <script src="js/render-reports.js"></script>
 <script src="js/render-admin.js"></script>

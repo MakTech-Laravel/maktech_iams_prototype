@@ -32,6 +32,7 @@ const NAV = [
     { id:'migrations', label:'Course Migration', ic:'swap', mod:'Payments' },
     { id:'refunds', label:'Refunds', ic:'wallet', mod:'Payments' },
     { id:'expenses', label:'Expenses & Vendors', ic:'expense', mod:'Expenses' },
+    { id:'teacher-payments', label:'Teacher Payments', ic:'graduationCap', mod:'TeacherPayments', count:()=>pendingTeacherPaymentsCountForUser(currentUserId) },
   ]},
   { id:'grp-certificates', label:'Certificates & ID', ic:'certificate', items:[
     { id:'certificates', label:'Certificates', ic:'certificate', mod:'Certificates' },
@@ -70,9 +71,10 @@ const VIEWS = {
   migrations:  { title:'Course Migration', sub:'Course transfer requests & fee recalculation', render:renderMigrations },
   refunds:     { title:'Refunds', sub:'Refund requests & approval workflow', render:renderRefunds },
   expenses:    { title:'Expenses & Vendors', sub:'Cost tracking with approval workflow', render:renderExpenses },
+  'teacher-payments': { title:'Teacher Payments', sub:'Per-batch pay rates, payment requests & disbursement vouchers', render:renderTeacherPayments },
   certificates:{ title:'Certificates', sub:'Auto-generated, QR-verifiable certificates', render:renderCertificates },
   idcards:     { title:'ID Cards', sub:'QR-coded student identity cards', render:renderIdCards },
-  reports:     { title:'Reports & Analytics', sub:'42 reports across every module', render:renderReports },
+  reports:     { title:'Reports & Analytics', sub:'44 reports across every module', render:renderReports },
   notifications:{ title:'Notifications & Automation', sub:'Delivery log and automation rules', render:renderNotifications },
   users:       { title:'Users & Roles', sub:'Staff accounts and role defaults', render:renderUsers },
   access:      { title:'Access Control', sub:'Per-user menu, page & data access permissions', render:renderAccessControl },
@@ -160,6 +162,7 @@ function navigate(viewId, opts){
   if(viewId==='followups') wireFollowupTabs();
   if(viewId==='attendance') wireAttendancePage();
   if(viewId==='cash-management') wireCashTabs();
+  if(viewId==='teacher-payments') wireTeacherPayTabs();
 }
 
 function refreshCurrentView(){ navigate(currentView); }
@@ -171,10 +174,27 @@ function applyIdentity(userId){
   currentRole = u.role_id;
   expandedGroupId = null;
   document.getElementById('roleSwitch').value = String(u.role_id);
-  document.querySelector('#userChip .avatar').textContent = initials(u.name);
+  paintAvatarEl(document.querySelector('#userChip .avatar'), u.name, u.photo);
   document.querySelector('#userChip .who b').textContent = u.name;
   document.querySelector('#userChip .who span').textContent = roleName(u.role_id);
+  if(!canAccessAdminPanel(u.id)){ renderAdminPanelBlocked(u); return; }
   navigate('dashboard');
+}
+
+/* Portal-only users (Coordinators/Teachers, by default) are blocked from the admin panel entirely and
+   pointed to the dedicated Teacher Portal instead — see AdminPanelAccess in data.js / Access Control. */
+function renderAdminPanelBlocked(u){
+  currentView = null;
+  document.getElementById('nav-root').innerHTML = '';
+  document.getElementById('pageTitle').textContent = 'Access Restricted';
+  document.getElementById('pageSub').textContent = 'This account only has Teacher Portal access';
+  document.getElementById('viewRoot').innerHTML = `
+    <div class="card card-pad" style="max-width:560px;margin:60px auto;text-align:center;">
+      <div class="kpi-icon" style="width:56px;height:56px;margin:0 auto 16px;background:var(--danger-50);color:var(--danger-600);">${icon('shield')}</div>
+      <h2 style="margin-bottom:8px;">Admin Panel Access Restricted</h2>
+      <p class="muted" style="margin-bottom:22px;"><b>${u.name}</b> (${roleName(u.role_id)}) doesn't have permission to use this admin panel. Coordinators/Teachers use a dedicated Teacher Portal for their batches, attendance, students & payments instead. An Admin can grant this specific person full admin-panel access from <b>Access Control</b> if needed.</p>
+      <a class="btn btn-primary" href="teacher-portal.html" target="_blank" rel="noopener">${icon('send')} Open Teacher Portal ↗</a>
+    </div>`;
 }
 function applyRoleSwitch(roleId){
   currentRole = Number(roleId);
@@ -411,10 +431,66 @@ document.addEventListener('click', function(e){
     case 'open-add-session': closeModal(); addSessionModal(t.dataset.courseid); break;
     case 'save-session': closeModal(); toast('Session created — you can now add batches inside it'); refreshCurrentView(); break;
 
+    /* ---- labs / classrooms ---- */
+    case 'open-add-lab': addLabModal(); break;
+    case 'save-lab': {
+      const name = document.getElementById('nlName')?.value.trim();
+      const capacity = Number(document.getElementById('nlCapacity')?.value);
+      if(!name || !capacity || capacity<1){ toast('Lab name and a valid capacity are required', 'error'); break; }
+      createLab({ name, capacity, location: document.getElementById('nlLocation')?.value.trim(), notes: document.getElementById('nlNotes')?.value.trim() });
+      closeModal(); toast('Lab created — it can now be assigned to batches'); refreshCurrentView();
+      break;
+    }
+    case 'open-edit-lab': editLabModal(id); break;
+    case 'save-lab-edit': {
+      const capacity = Number(document.getElementById('elCapacity')?.value);
+      if(!capacity || capacity<1){ toast('Capacity must be at least 1', 'error'); break; }
+      updateLab(id, { name: document.getElementById('elName')?.value, capacity, location: document.getElementById('elLocation')?.value, notes: document.getElementById('elNotes')?.value, status: document.getElementById('elStatus')?.value });
+      closeModal(); toast('Lab updated'); refreshCurrentView();
+      break;
+    }
+
     /* ---- batches & teacher assignment ---- */
     case 'view-batch': batchDetailModal(id); break;
     case 'open-add-batch': closeModal(); addBatchModal(t.dataset.sessionid); break;
-    case 'save-batch': closeModal(); toast('Batch created'); refreshCurrentView(); break;
+    case 'save-batch': {
+      const sessionId = Number(document.getElementById('nbSession')?.value);
+      const name = document.getElementById('nbName')?.value.trim();
+      const labId = document.getElementById('nbLab')?.value;
+      const capacity = Number(document.getElementById('nbCapacity')?.value);
+      const start = document.getElementById('nbStart')?.value, end = document.getElementById('nbEnd')?.value;
+      if(!sessionId || !name || !labId || !capacity || !start || !end){ toast('Session, batch name, lab, capacity & dates are all required', 'error'); break; }
+      const session = DB.sessions.find(s=>s.id===sessionId);
+      const teachers = [...document.querySelectorAll('.nbTeacherCb:checked')].map(cb=>Number(cb.value));
+      const { batch, clamped } = createBatch({
+        sessionId, courseId: session?.course_id, name, capacity, start, end,
+        coordinatorId: document.getElementById('nbCoordinator')?.value,
+        labId, assignedTeachers: teachers, status: document.getElementById('nbStatus')?.value
+      });
+      closeModal();
+      toast(clamped ? `Batch created — capacity clamped to ${batch.capacity} (${labName(batch.lab_id)}'s limit)` : 'Batch created');
+      refreshCurrentView();
+      break;
+    }
+    case 'open-edit-batch': editBatchModal(id); break;
+    case 'save-batch-edit': {
+      const b = DB.batches.find(x=>x.id===id); if(!b) break;
+      const name = document.getElementById('ebName')?.value.trim();
+      const labId = Number(document.getElementById('ebLab')?.value);
+      const capacity = Number(document.getElementById('ebCapacity')?.value);
+      if(!name || !labId || !capacity){ toast('Batch name, lab & capacity are required', 'error'); break; }
+      const lab = labById(labId);
+      const currentlyEnrolled = batchEnrolledCount(b.id);
+      const cap = lab ? Math.min(capacity, lab.capacity) : capacity;
+      if(cap < currentlyEnrolled) toast(`Note: capacity (${cap}) is now below the ${currentlyEnrolled} students already enrolled — no new seats will open until enrollment drops.`, 'error');
+      b.name = name; b.lab_id = lab ? lab.id : b.lab_id; b.capacity = cap;
+      if(effectivePerm(currentUserId,'Batches','ChangeStatus')) b.status = document.getElementById('ebStatus')?.value || b.status;
+      b.start = document.getElementById('ebStart')?.value || b.start;
+      b.end = document.getElementById('ebEnd')?.value || b.end;
+      b.coordinator_id = Number(document.getElementById('ebCoordinator')?.value) || b.coordinator_id;
+      closeModal(); toast('Batch updated'); refreshCurrentView();
+      break;
+    }
     case 'open-manage-teachers': manageTeachersModal(id); break;
     case 'toggle-batch-teacher': {
       const batchId = Number(t.dataset.batchid), teacherId = Number(t.dataset.teacherid);
@@ -426,10 +502,33 @@ document.addEventListener('click', function(e){
     /* ---- students ---- */
     case 'view-student': closeDrawer(); closeModal(); studentProfileDrawer(id); break;
     case 'open-add-student': addStudentModal(); break;
-    case 'save-student': closeModal(); toast('Student registered successfully — enrolled in one primary course & batch'); refreshCurrentView(); break;
+    case 'save-student': {
+      const name = document.getElementById('stName')?.value.trim();
+      const phone = document.getElementById('stPhone')?.value.trim();
+      const courseId = document.getElementById('stCourse')?.value;
+      const batchId = document.getElementById('stBatch')?.value;
+      if(!name || !phone || !courseId || !batchId){ toast('Name, phone, course & batch are all required', 'error'); break; }
+      const cap = canEnrollInBatch(batchId);
+      if(!cap.ok){ toast(cap.reason, 'error'); break; }
+      registerStudentWithEnrollment({
+        name, phone, courseId, batchId,
+        dob: document.getElementById('stDob')?.value, gender: document.getElementById('stGender')?.value,
+        nid: document.getElementById('stNid')?.value.trim(), email: document.getElementById('stEmail')?.value.trim(),
+        presentAddress: document.getElementById('stPresentAddr')?.value.trim(), permanentAddress: document.getElementById('stPermAddr')?.value.trim(),
+        institutionId: document.getElementById('stInstitution')?.value, roll: document.getElementById('stRoll')?.value.trim(),
+        guardianName: document.getElementById('stGuardianName')?.value.trim(), guardianPhone: document.getElementById('stGuardianPhone')?.value.trim(),
+      });
+      closeModal(); toast('Student registered successfully — enrolled in one primary course & batch'); refreshCurrentView();
+      break;
+    }
     case 'open-edit-student': toast('Edit form would open here (demo)'); break;
     case 'open-add-additional-course': closeDrawer(); addAdditionalCourseModal(t.dataset.id); break;
-    case 'approve-enrollment-request': { const inv = approveEnrollmentRequest(id, currentUserId); if(inv) toast(`Enrollment approved — invoice ${inv.invoice_no} created, due ${fmtMoney(inv.due)}`); refreshCurrentView(); break; }
+    case 'approve-enrollment-request': {
+      const req = DB.enrollmentRequests.find(r=>r.id===id);
+      const cap = req ? canEnrollInBatch(req.batch_id) : { ok:false, reason:'Request not found.' };
+      if(!cap.ok){ toast('Cannot approve — ' + cap.reason, 'error'); break; }
+      const inv = approveEnrollmentRequest(id, currentUserId); if(inv) toast(`Enrollment approved — invoice ${inv.invoice_no} created, due ${fmtMoney(inv.due)}`); refreshCurrentView(); break;
+    }
     case 'reject-enrollment-request': { rejectEnrollmentRequest(id, currentUserId, null); toast('Enrollment request rejected', 'error'); refreshCurrentView(); break; }
     case 'save-additional-course': {
       const sid = Number(t.dataset.studentid);
@@ -438,7 +537,10 @@ document.addEventListener('click', function(e){
       const reason = document.getElementById('addlCourseReason')?.value || 'Admin override — see history for details.';
       if(s && sel){
         const opt = sel.selectedOptions[0];
-        s.courses.push({ course_id:Number(opt.dataset.courseid), batch_id:Number(opt.dataset.batchid), enrolled_price:Number(opt.dataset.price), discount:0, date:'2026-08-06', status:'active', type:'additional', added_by: currentUserId, added_reason: reason, added_date:'2026-08-06' });
+        const batchId = Number(opt.dataset.batchid);
+        const cap = canEnrollInBatch(batchId);
+        if(!cap.ok){ toast(cap.reason, 'error'); break; }
+        s.courses.push({ course_id:Number(opt.dataset.courseid), batch_id:batchId, enrolled_price:Number(opt.dataset.price), discount:0, date:'2026-08-06', status:'active', type:'additional', added_by: currentUserId, added_reason: reason, added_date:'2026-08-06' });
       }
       closeModal(); toast('Additional course added — tagged for history/reporting'); studentProfileDrawer(sid,'courses');
       break;
@@ -551,6 +653,47 @@ document.addEventListener('click', function(e){
     case 'save-expense': closeModal(); toast('Expense logged, pending approval'); refreshCurrentView(); break;
     case 'approve-expense': { const ex = DB.expenses.find(x=>x.id===id); if(ex){ ex.status='approved'; ex.approved_by=2; toast('Expense approved'); refreshCurrentView(); } break; }
 
+    /* ---- teacher payments (per-batch pay rates, requests, approval & disbursement) ---- */
+    case 'open-set-payrate': setPayRateModal(t.dataset.teacherid, t.dataset.batchid); break;
+    case 'save-payrate': {
+      const teacherId = Number(t.dataset.teacherid), batchId = Number(t.dataset.batchid);
+      const rateType = document.getElementById('tpRateType')?.value;
+      const rateAmount = Number(document.getElementById('tpRateAmount')?.value) || 0;
+      if(rateAmount<=0){ toast('Enter a valid rate amount', 'error'); break; }
+      setPayRate(teacherId, batchId, rateType, rateAmount, document.getElementById('tpRateNotes')?.value.trim());
+      closeModal(); toast('Pay rate saved'); refreshCurrentView();
+      break;
+    }
+    case 'open-raise-teacher-payment': raiseTeacherPaymentModal(t.dataset.teacherid, t.dataset.batchid); break;
+    case 'save-teacher-payment': {
+      const teacherId = Number(t.dataset.teacherid), batchId = Number(t.dataset.batchid);
+      const amount = Number(document.getElementById('tpAmount')?.value) || 0;
+      const periodLabel = document.getElementById('tpPeriodLabel')?.value.trim();
+      if(amount<=0 || !periodLabel){ toast('Amount and period/description are required', 'error'); break; }
+      requestTeacherPayment({ teacherId, batchId, type: document.getElementById('tpPayType')?.value, periodLabel, amount, computedAmount: Number(t.dataset.computed)||0, notes: document.getElementById('tpNotes')?.value.trim(), requestedBy: currentUserId });
+      closeModal(); toast('Payment request submitted for approval'); refreshCurrentView();
+      break;
+    }
+    case 'approve-teacher-payment': { const p = approveTeacherPayment(id, currentUserId); if(p) toast(`${p.voucher_no} approved — ready for disbursement`); refreshCurrentView(); break; }
+    case 'open-reject-teacher-payment': rejectTeacherPaymentModal(id); break;
+    case 'save-reject-teacher-payment': {
+      const reason = document.getElementById('tpRejectReason')?.value.trim();
+      if(!reason){ toast('Please provide a reason', 'error'); break; }
+      rejectTeacherPayment(id, currentUserId, reason);
+      closeModal(); toast('Payment request rejected', 'error'); refreshCurrentView();
+      break;
+    }
+    case 'open-pay-teacher-payment': markPaidModal(id); break;
+    case 'save-pay-teacher-payment': {
+      const method = document.getElementById('tpPayMethod')?.value;
+      const txnRef = document.getElementById('tpTxnRef')?.value.trim();
+      const p = markTeacherPaymentPaid(id, { paidBy: currentUserId, method, txnRef });
+      closeModal();
+      if(p){ toast('Payment disbursed & voucher generated'); refreshCurrentView(); teacherPaymentVoucherModal(p.id); }
+      break;
+    }
+    case 'view-teacher-payment': teacherPaymentVoucherModal(id); break;
+
     /* ---- certificates / id cards ---- */
     case 'open-cert-template': certTemplateModal(); break;
     case 'preview-certificate': certificatePreviewModal(id); break;
@@ -564,6 +707,19 @@ document.addEventListener('click', function(e){
 
     /* ---- reports ---- */
     case 'open-report': openReportModal(id); break;
+    case 'open-locked-report': toast("You don't have access to this report — ask an Admin to grant it from Access Control", 'error'); break;
+
+    /* ---- My Profile (topbar user-chip) ---- */
+    case 'open-my-profile': myProfileModal(currentUserId); break;
+    case 'remove-my-profile-photo': {
+      setUserPhoto(currentUserId, null);
+      const u = DB.users.find(x=>x.id===currentUserId);
+      paintAvatarEl(document.querySelector('#userChip .avatar'), u.name, null);
+      myProfileModal(currentUserId);
+      refreshCurrentView();
+      toast('Profile photo removed');
+      break;
+    }
 
     /* ---- notifications ---- */
     case 'open-send-notification':
@@ -613,6 +769,66 @@ document.addEventListener('click', function(e){
       break;
     }
     case 'preview-as-user': previewAsUser(id); break;
+
+    /* ---- Report Access permissions ---- */
+    case 'toggle-role-report-perm': {
+      const role = t.dataset.role;
+      DB.rolePermMatrix[role]["Reports"]["Report_"+t.dataset.reportid] = t.checked;
+      break;
+    }
+    case 'toggle-user-report-perm': {
+      const uid = Number(t.dataset.userid);
+      setUserPermOverride(uid, "Reports", "Report_"+t.dataset.reportid, t.checked);
+      break;
+    }
+
+    /* ---- List / Data Visibility permissions ---- */
+    case 'toggle-role-list-perm': {
+      const role = t.dataset.role, mod = t.dataset.mod;
+      DB.rolePermMatrix[role][mod]["List_"+t.dataset.key] = t.checked;
+      break;
+    }
+    case 'toggle-user-list-perm': {
+      const uid = Number(t.dataset.userid), mod = t.dataset.mod;
+      setUserPermOverride(uid, mod, "List_"+t.dataset.key, t.checked);
+      break;
+    }
+
+    /* ---- Admin Panel Access (teacher portal gating) ---- */
+    case 'toggle-user-adminpanel-access': {
+      const uid = Number(t.dataset.userid);
+      setUserPermOverride(uid, "Users", "AdminPanelAccess", t.checked);
+      toast(t.checked ? 'Admin panel access granted' : 'Admin panel access revoked — user will use the Teacher Portal instead');
+      renderAccessControlBody(uid);
+      break;
+    }
+
+    /* ---- Manual status-change (gated by the ChangeStatus permission) ---- */
+    case 'open-change-student-status': {
+      if(!effectivePerm(currentUserId,'Students','ChangeStatus')){ toast("You don't have permission to change student status", 'error'); break; }
+      changeStudentStatusModal(id); break;
+    }
+    case 'save-change-student-status': {
+      if(!effectivePerm(currentUserId,'Students','ChangeStatus')){ toast("You don't have permission to change student status", 'error'); break; }
+      const newStatus = document.getElementById('csNewStatus')?.value;
+      const reason = document.getElementById('csReason')?.value.trim();
+      changeStudentStatus(id, newStatus, reason, currentUserId);
+      closeModal(); toast('Student status updated'); refreshCurrentView();
+      break;
+    }
+    case 'open-change-invoice-status': {
+      if(!effectivePerm(currentUserId,'Payments','ChangeStatus')){ toast("You don't have permission to change payment status", 'error'); break; }
+      changeInvoiceStatusModal(id); break;
+    }
+    case 'save-change-invoice-status': {
+      if(!effectivePerm(currentUserId,'Payments','ChangeStatus')){ toast("You don't have permission to change payment status", 'error'); break; }
+      const newStatus = document.getElementById('cisNewStatus')?.value;
+      const reason = document.getElementById('cisReason')?.value.trim();
+      if(!reason){ toast('Please provide a reason for this manual status change', 'error'); break; }
+      changeInvoiceStatus(id, newStatus, reason, currentUserId);
+      closeModal(); toast('Invoice status updated'); refreshCurrentView();
+      break;
+    }
   }
 });
 

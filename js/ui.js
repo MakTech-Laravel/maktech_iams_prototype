@@ -123,9 +123,44 @@ function kpiCard(iconName, label, value, trend, color){
   </div>`;
 }
 
-/* ---------------- Avatar initials ---------------- */
+/* ---------------- Avatar initials / photo ---------------- */
 function initials(name){ return (name||'?').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase(); }
-function avatarHtml(name, size){ return `<div class="avatar ${size||''}">${initials(name)}</div>`; }
+function avatarHtml(name, size, photo){
+  if(photo) return `<div class="avatar has-photo ${size||''}"><img src="${photo}" alt=""></div>`;
+  return `<div class="avatar ${size||''}">${initials(name)}</div>`;
+}
+/* Paints a live avatar element (e.g. a topbar/header chip) in place, without re-rendering the whole page */
+function paintAvatarEl(el, name, photo){
+  if(!el) return;
+  el.classList.toggle('has-photo', !!photo);
+  el.innerHTML = photo ? `<img src="${photo}" alt="">` : '';
+  if(!photo) el.textContent = initials(name);
+}
+
+/* ---------------- Profile photo upload (shared by Admin/My Profile, Student Portal & Teacher Portal) ---------------- */
+function profilePhotoBlockHtml(name, photo, opts){
+  opts = opts || {};
+  const inputId = opts.inputId || 'profilePhotoInput';
+  const removeAction = opts.removeAction || 'remove-profile-photo';
+  return `
+  <div class="avatar lg ${photo?'has-photo':''}" id="${opts.previewId||'profilePhotoPreview'}" style="margin:0 auto;">${photo?`<img src="${photo}" alt="">`:initials(name)}</div>
+  <div class="flex-gap" style="justify-content:center;flex-wrap:wrap;margin-top:12px;">
+    <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin:0;">${icon('upload')} Change Photo<input type="file" accept="image/*" id="${inputId}" style="display:none;"></label>
+    ${photo ? `<button type="button" class="btn btn-ghost btn-sm" data-action="${removeAction}">${icon('close')} Remove</button>` : ''}
+  </div>`;
+}
+/* Wires the hidden file input created by profilePhotoBlockHtml — reads the chosen image as a data URL (demo-only, in-memory) */
+function wireProfilePhotoInput(inputId, onPhoto){
+  const input = document.getElementById(inputId); if(!input) return;
+  input.addEventListener('change', ()=>{
+    const file = input.files && input.files[0]; if(!file) return;
+    if(!file.type.startsWith('image/')){ toast('Please choose an image file', 'error'); input.value=''; return; }
+    if(file.size > 3*1024*1024){ toast('Image is too large — 3MB max for this demo', 'error'); input.value=''; return; }
+    const reader = new FileReader();
+    reader.onload = ()=>{ onPhoto(reader.result); input.value=''; };
+    reader.readAsDataURL(file);
+  });
+}
 
 /* ---------------- Pagination footer (visual only) ---------------- */
 function paginationHtml(total, shown){

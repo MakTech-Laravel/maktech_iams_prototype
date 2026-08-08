@@ -45,6 +45,10 @@ const REPORTS = [
     {id:35, t:'Accountant-wise Collection Reconciliation', d:'Collections tallied per accountant', ic:'payment'},
     {id:42, t:'Cash Deposit & Handover Report', d:'Chain of custody: cash collected → bank deposit / signed handover', ic:'wallet'},
   ]},
+  {sec:'Teacher Payment Reports', items:[
+    {id:43, t:'Teacher Payment Summary Report', d:'Per teacher, per batch — rate, computed earnings, paid & outstanding', ic:'graduationCap'},
+    {id:44, t:'Teacher Payment Voucher Log', d:'All payment requests & vouchers with approval/disbursement status', ic:'wallet'},
+  ]},
   {sec:'Certificate / ID Card Reports', items:[
     {id:36, t:'Certificates Issued Report', d:'Date range, course-wise', ic:'certificate'},
     {id:37, t:'Pending Certificate Report', d:'Completed but not yet certified', ic:'clock'},
@@ -58,18 +62,28 @@ const REPORTS = [
 ];
 
 function renderReports(){
+  const lockedCount = REPORTS.flatMap(g=>g.items).filter(r=>!canAccessReport(currentUserId, r.id)).length;
   const sections = REPORTS.map(g=>`
     <h3 class="report-section-title">${g.sec}</h3>
     <div class="grid grid-4" style="margin-bottom:8px;">
-      ${g.items.map(r=>`
+      ${g.items.map(r=>{
+        const allowed = canAccessReport(currentUserId, r.id);
+        return allowed ? `
         <div class="report-card" data-action="open-report" data-id="${r.id}">
           <div class="ric">${ICONS[r.ic]}</div>
           <div><b>${r.t}</b><span>${r.d}</span></div>
-        </div>`).join('')}
+        </div>` : `
+        <div class="report-card" data-action="open-locked-report" data-id="${r.id}" style="opacity:.5;cursor:not-allowed;position:relative;" title="You don't have access to this report">
+          <div class="ric">${ICONS[r.ic]}</div>
+          <div><b>${r.t}</b><span>${r.d}</span></div>
+          <div style="position:absolute;top:10px;right:10px;color:var(--gray-400);">${icon('lock')}</div>
+        </div>`;
+      }).join('')}
     </div>`).join('');
   return `
+  ${lockedCount ? `<div class="badge badge-gray" style="white-space:normal;text-align:left;margin-bottom:14px;">${icon('lock')} ${lockedCount} report(s) are locked for your account — an Admin can grant access per report from Access Control.</div>` : ''}
   <div class="view-header">
-    <div><h1>Reports & Analytics</h1><p>All 42 reports from the blueprint — every report supports date-range filter, Excel/PDF export, print view</p></div>
+    <div><h1>Reports & Analytics</h1><p>All 44 reports from the blueprint — every report supports date-range filter, Excel/PDF export, print view</p></div>
     <div class="view-actions"><button class="btn btn-secondary btn-sm">${icon('filter')} Global Filters</button></div>
   </div>
   ${sections}
@@ -127,6 +141,9 @@ const REPORT_RENDERERS = {
   39: ()=> tableHtml(['User','Module','Action','Record','Date'], DB.auditLogs.map(a=>[userName(a.user_id), a.module, a.action, a.record, fmtDate(a.date)])),
   40: ()=> tableHtml(['Recipient','Channel','Type','Status','Date'], DB.notifications.map(n=>[n.recipient, n.channel.toUpperCase(), n.type.replace(/_/g,' '), statusBadge(n.status), fmtDate(n.date)])),
   42: ()=> tableHtml(['Receipt','Date','Type','Amount','Handled By','To','Status'], DB.cashHandovers.map(h=>[h.receipt_no, fmtDate(h.date), h.type==='bank_deposit'?'Bank Deposit':'Handover', fmtMoney(h.amount), userName(h.created_by), h.type==='bank_deposit'?h.bank_name:userName(h.handed_to), statusBadge(h.status==='confirmed'?'active':'pending', h.status==='confirmed'?'Confirmed':'Pending')])),
+  43: ()=> tableHtml(['Teacher','Batch','Rate','Computed Earned','Paid','Outstanding'], teacherBatchPairs().map(pr=>{ const rate=payRateFor(pr.teacher_id,pr.batch_id);
+    return [userName(pr.teacher_id), batchName(pr.batch_id), rate?`${PAY_RATE_TYPE_LABELS[rate.rate_type]} (${fmtMoney(rate.rate_amount)})`:'No rate set', fmtMoney(computeEarnedForTeacherBatch(pr.teacher_id,pr.batch_id)), fmtMoney(totalPaidToTeacherForBatch(pr.teacher_id,pr.batch_id)), fmtMoney(outstandingForTeacherBatch(pr.teacher_id,pr.batch_id))]; })),
+  44: ()=> tableHtml(['Voucher','Teacher','Batch','Type','Amount','Status','Date'], DB.teacherPayments.map(p=>[p.voucher_no, userName(p.teacher_id), batchName(p.batch_id), TEACHER_PAY_TYPE_LABELS[p.type], fmtMoney(p.amount), statusBadge(p.status), fmtDate(p.paid_date||p.approved_date||p.requested_date)])),
 };
 
 function tableHtml(cols, rows){
@@ -145,6 +162,7 @@ function genericReportFallback(r){
 
 function openReportModal(id){
   const r = REPORTS.flatMap(g=>g.items).find(x=>x.id===id); if(!r) return;
+  if(!canAccessReport(currentUserId, id)){ toast("You don't have access to this report — ask an Admin to grant it from Access Control", 'error'); return; }
   const renderer = REPORT_RENDERERS[id];
   openModal({ size:'xl',
     title:r.t, sub:r.d,

@@ -4,13 +4,16 @@
 
 function renderStudents(){
   const isScoped = isTeacherRole(currentUserId);
-  const students = isScoped ? scopedStudentsForUser(currentUserId) : DB.students;
+  const scoped = isScoped ? scopedStudentsForUser(currentUserId) : DB.students;
+  const students = visibleStudentsForUser(currentUserId, scoped);
+  const hiddenByListPerm = scoped.length - students.length;
+  const canChangeStatus = effectivePerm(currentUserId,'Students','ChangeStatus');
   const rows = students.map(s=>{
     const inv = invoiceForStudent(s.id);
     const primary = primaryEnrollment(s);
     const extra = additionalEnrollments(s).length;
     return `<tr class="row-link" data-action="view-student" data-id="${s.id}">
-      <td>${avatarHtml(s.name,'sm')}</td>
+      <td>${avatarHtml(s.name,'sm',s.photo)}</td>
       <td><span class="cell-strong">${s.name}</span><div class="cell-sub">${s.code}</div></td>
       <td>${institutionName(s.institution_id)}</td>
       <td>${courseName(primary?.course_id)} ${extra ? `<span class="badge badge-amber" title="Has ${extra} additional admin-added enrollment(s)">+${extra} more</span>` : ''}</td>
@@ -18,6 +21,7 @@ function renderStudents(){
       <td>${s.phone}</td>
       <td>${inv ? statusBadge(inv.status) : '<span class="muted">—</span>'}</td>
       <td>${statusBadge(s.status, STUDENT_STATUS_LABELS[s.status])}</td>
+      <td>${canChangeStatus ? `<button class="btn btn-sm btn-ghost" title="Change status" data-action="open-change-student-status" data-id="${s.id}">${icon('swap')}</button>` : ''}</td>
     </tr>`;
   }).join('');
 
@@ -29,6 +33,7 @@ function renderStudents(){
     </div>
   </div>
   ${isScoped ? `<div class="badge badge-amber" style="margin-bottom:16px;">${icon('shield')} You only have access to students in your assigned batches/courses.</div>` : ''}
+  ${hiddenByListPerm>0 ? `<div class="badge badge-gray" style="white-space:normal;text-align:left;margin-bottom:16px;">${icon('lock')} ${hiddenByListPerm} student(s) hidden — you don't have permission to view one or more status lists (Active/Dropped/On Hold/Completed). Ask Admin to grant access via Access Control.</div>` : ''}
   <div class="grid grid-4" style="margin-bottom:20px;">
     ${kpiCard('students','Total Students', students.length, null, '#ff6533')}
     ${kpiCard('checkCircle','Active', students.filter(s=>s.status==='active').length, null, '#10b981')}
@@ -40,13 +45,25 @@ function renderStudents(){
     <select><option>All Courses</option>${DB.courses.map(c=>`<option>${c.name}</option>`).join('')}</select>
     <select><option>All Batches</option>${DB.batches.map(b=>`<option>${b.name}</option>`).join('')}</select>
     <select><option>All Institutes</option>${DB.institutions.map(i=>`<option>${i.name}</option>`).join('')}</select>
-    <select><option>All Status</option>${Object.values(STUDENT_STATUS_LABELS).map(v=>`<option>${v}</option>`).join('')}</select>
+    <select><option>All Status</option>${allowedStudentStatusKeys(currentUserId).map(k=>`<option>${{Active:'Active',Dropped:'Dropped',OnHold:'On Hold',Completed:'Completed/Certified'}[k]}</option>`).join('')}</select>
   </div>
   <div class="card">
-    <div class="table-wrap"><table class="data-table"><thead><tr><th></th><th>Student</th><th>Institution</th><th>Course</th><th>Batch</th><th>Phone</th><th>Payment</th><th>Status</th></tr></thead>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th></th><th>Student</th><th>Institution</th><th>Course</th><th>Batch</th><th>Phone</th><th>Payment</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody></table></div>
     ${paginationHtml(students.length, students.length)}
   </div>`;
+}
+
+function changeStudentStatusModal(id){
+  const s = studentById(id); if(!s) return;
+  openModal({
+    title:'Change Student Status', sub:`${s.name} (${s.code}) — current: ${STUDENT_STATUS_LABELS[s.status]}`,
+    body:`<div class="form-grid single">
+      <div class="field"><label>New Status *</label><select id="csNewStatus">${Object.entries(STUDENT_STATUS_LABELS).map(([k,v])=>`<option value="${k}" ${k===s.status?'selected':''}>${v}</option>`).join('')}</select></div>
+      <div class="field"><label>Reason / Notes</label><textarea id="csReason" placeholder="Why is the status changing? (optional, kept in Audit Log)"></textarea></div>
+    </div>`,
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-change-student-status" data-id="${s.id}">${icon('check')} Update Status</button>`
+  });
 }
 
 function studentProfileDrawer(id, tab){
@@ -92,6 +109,7 @@ function studentProfileDrawer(id, tab){
       <button class="btn btn-outline btn-sm" data-action="open-edit-student" data-id="${s.id}">${icon('edit')} Edit Profile</button>
       <button class="btn btn-secondary btn-sm" data-action="open-migration" data-id="${s.id}">${icon('swap')} Course Migration</button>
       <button class="btn btn-secondary btn-sm" data-action="issue-idcard" data-id="${s.id}">${icon('idcard')} Issue ID Card</button>
+      ${effectivePerm(currentUserId,'Students','ChangeStatus') ? `<button class="btn btn-secondary btn-sm" data-action="open-change-student-status" data-id="${s.id}">${icon('shield')} Change Status</button>` : ''}
     </div>`;
   } else if(tab==='docs'){
     body += `<div class="grid grid-2">
@@ -164,38 +182,51 @@ function studentProfileDrawer(id, tab){
 }
 
 function addStudentModal(){
+  const activeCourses = DB.courses.filter(c=>c.status==='active');
   openModal({ size:'lg',
     title:'Register New Student', sub:'Staff-assisted registration — personal info, academic background & course assignment',
     body:`
     <div class="tabs" style="margin-bottom:14px;"><button class="tab-btn active">Personal Info</button><button class="tab-btn">Academic & Course</button><button class="tab-btn">Documents</button></div>
     <div class="form-grid">
-      <div class="field"><label>Full Name *</label><input type="text" placeholder="Student full name"></div>
-      <div class="field"><label>Date of Birth</label><input type="date"></div>
-      <div class="field"><label>Gender</label><select><option>Male</option><option>Female</option><option>Other</option></select></div>
-      <div class="field"><label>NID / Birth Cert No.</label><input type="text"></div>
-      <div class="field"><label>Phone (Portal Login) *</label><input type="text" placeholder="01XXXXXXXXX"></div>
-      <div class="field"><label>Email (optional)</label><input type="text"></div>
-      <div class="field span-2"><label>Present Address</label><input type="text"></div>
-      <div class="field span-2"><label>Permanent Address</label><input type="text"></div>
-      <div class="field"><label>Institution *</label><select>${DB.institutions.map(i=>`<option>${i.name}</option>`).join('')}</select></div>
-      <div class="field"><label>Roll/Reg No.</label><input type="text"></div>
-      <div class="field"><label>Guardian Name</label><input type="text"></div>
-      <div class="field"><label>Guardian Phone</label><input type="text"></div>
-      <div class="field"><label>Course *</label><select>${DB.courses.filter(c=>c.status==='active').map(c=>`<option>${c.name}</option>`).join('')}</select></div>
-      <div class="field"><label>Batch *</label><select>${DB.batches.filter(b=>b.status!=='completed').map(b=>`<option>${b.name}</option>`).join('')}</select></div>
+      <div class="field"><label>Full Name *</label><input type="text" id="stName" placeholder="Student full name"></div>
+      <div class="field"><label>Date of Birth</label><input type="date" id="stDob"></div>
+      <div class="field"><label>Gender</label><select id="stGender"><option>Male</option><option>Female</option><option>Other</option></select></div>
+      <div class="field"><label>NID / Birth Cert No.</label><input type="text" id="stNid"></div>
+      <div class="field"><label>Phone (Portal Login) *</label><input type="text" id="stPhone" placeholder="01XXXXXXXXX"></div>
+      <div class="field"><label>Email (optional)</label><input type="text" id="stEmail"></div>
+      <div class="field span-2"><label>Present Address</label><input type="text" id="stPresentAddr"></div>
+      <div class="field span-2"><label>Permanent Address</label><input type="text" id="stPermAddr"></div>
+      <div class="field"><label>Institution *</label><select id="stInstitution">${DB.institutions.map(i=>`<option value="${i.id}">${i.name}</option>`).join('')}</select></div>
+      <div class="field"><label>Roll/Reg No.</label><input type="text" id="stRoll"></div>
+      <div class="field"><label>Guardian Name</label><input type="text" id="stGuardianName"></div>
+      <div class="field"><label>Guardian Phone</label><input type="text" id="stGuardianPhone"></div>
+      <div class="field"><label>Course *</label><select id="stCourse" onchange="onAddStudentCourseChange()">${activeCourses.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
+      <div class="field"><label>Batch *</label><select id="stBatch"></select></div>
       <div class="field span-2"><div class="badge badge-blue" style="white-space:normal;text-align:left;">${icon('alertCircle')} A student can be actively enrolled in only ONE course & ONE batch through this form. Need to add a second course for this student? Do it afterwards from their profile → Courses tab → "Add Additional Course (Admin Override)" — it will be tagged and reasoned for history/reporting.</div></div>
     </div>`,
     foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-student">${icon('check')} Register Student</button>`
   });
+  setTimeout(onAddStudentCourseChange, 0);
+}
+/* Batch list is scoped to the selected course and shows live seats-left (capped by the assigned lab); full batches are shown but disabled. */
+function onAddStudentCourseChange(){
+  const courseSel = document.getElementById('stCourse'); const batchSel = document.getElementById('stBatch');
+  if(!courseSel || !batchSel) return;
+  const batches = DB.batches.filter(b=>b.course_id===Number(courseSel.value) && b.status!=='completed');
+  batchSel.innerHTML = batches.map(b=>{
+    const seatsLeft = batchSeatsAvailable(b.id);
+    return `<option value="${b.id}" ${seatsLeft<=0?'disabled':''}>${b.name} — ${labName(b.lab_id)} (${seatsLeft<=0?'FULL':seatsLeft+' seats left'})</option>`;
+  }).join('') || '<option value="">No open batches for this course</option>';
 }
 
 function addAdditionalCourseModal(studentId){
   const sid = Number(studentId);
   const s = studentById(sid); if(!s) return;
   const activeCourses = DB.courses.filter(c=>c.status==='active');
-  const options = activeCourses.flatMap(c => DB.batches.filter(b=>b.course_id===c.id && b.status!=='completed').map(b =>
-    `<option data-courseid="${c.id}" data-batchid="${b.id}" data-price="${c.base_price}">${c.name} — ${b.name}</option>`
-  )).join('');
+  const options = activeCourses.flatMap(c => DB.batches.filter(b=>b.course_id===c.id && b.status!=='completed').map(b => {
+    const seatsLeft = batchSeatsAvailable(b.id);
+    return `<option data-courseid="${c.id}" data-batchid="${b.id}" data-price="${c.base_price}" ${seatsLeft<=0?'disabled':''}>${c.name} — ${b.name} (${seatsLeft<=0?'FULL':seatsLeft+' seats left'})</option>`;
+  })).join('');
   openModal({
     title:'Add Additional Course (Admin Override)', sub:`${s.name} already has ${s.courses.length} enrollment(s) — this is a deliberate exception to the one-course rule`,
     body:`
@@ -216,7 +247,7 @@ function renderEnrollmentRequests(){
   const rowsFor = (list, withActions)=> list.map(r=>{
     const s = studentById(r.student_id);
     return `<tr>
-      <td>${avatarHtml(s?.name||'—','sm')}</td>
+      <td>${avatarHtml(s?.name||'—','sm',s?.photo)}</td>
       <td><span class="cell-strong">${s?.name||'—'}</span><div class="cell-sub">${s?.phone||''}</div></td>
       <td>${courseName(r.course_id)}</td>
       <td>${sessionName(r.session_id)} · ${batchName(r.batch_id)}</td>
@@ -313,7 +344,7 @@ function attendanceMarkPane(){
   });
   const rows = roster.map(s=>`
     <tr data-studentrow="${s.id}">
-      <td>${avatarHtml(s.name,'sm')}</td>
+      <td>${avatarHtml(s.name,'sm',s.photo)}</td>
       <td class="cell-strong">${s.name}</td>
       <td>${s.code}</td>
       <td><div class="flex-gap">${['present','absent','late','excused'].map(st=>`<button class="btn btn-sm ${currentAttMarks[s.id]===st?'btn-primary':'btn-secondary'}" data-action="mark-attendance-cell" data-studentid="${s.id}" data-status="${st}" style="padding:5px 10px;">${st[0].toUpperCase()}</button>`).join('')}</div></td>

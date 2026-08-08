@@ -5,7 +5,10 @@
 
 /* ---------------- INVOICES & PAYMENTS ---------------- */
 function renderInvoices(){
-  const invRows = DB.feeInvoices.map(i=>`
+  const visibleInvoices = visibleInvoicesForUser(currentUserId, DB.feeInvoices);
+  const hiddenByListPerm = DB.feeInvoices.length - visibleInvoices.length;
+  const canChangeStatus = effectivePerm(currentUserId,'Payments','ChangeStatus');
+  const invRows = visibleInvoices.map(i=>`
     <tr class="row-link" data-action="view-invoice" data-id="${i.id}">
       <td class="cell-strong">${i.invoice_no}</td>
       <td>${studentName(i.student_id)}</td>
@@ -15,6 +18,7 @@ function renderInvoices(){
       <td style="color:${i.due>0?'var(--danger-600)':'var(--gray-400)'};">${fmtMoney(i.due)}</td>
       <td>${fmtDate(i.due_date)}</td>
       <td>${statusBadge(i.status)}</td>
+      <td>${canChangeStatus ? `<button class="btn btn-sm btn-ghost" title="Change status" data-action="open-change-invoice-status" data-id="${i.id}">${icon('swap')}</button>` : ''}</td>
     </tr>`).join('');
 
   const payRows = DB.payments.slice().reverse().map(p=>`
@@ -46,12 +50,13 @@ function renderInvoices(){
   </div>
 
   <h3 class="report-section-title">Fee Invoices</h3>
+  ${hiddenByListPerm>0 ? `<div class="badge badge-gray" style="white-space:normal;text-align:left;margin-bottom:14px;">${icon('lock')} ${hiddenByListPerm} invoice(s) hidden — you don't have permission to view one or more status lists (Paid/Partial/Due/Overdue). Ask Admin to grant access via Access Control.</div>` : ''}
   <div class="filter-bar">
     <div class="search-input-wrap">${icon('search')}<input type="text" placeholder="Search invoice or student…"></div>
-    <select><option>All Status</option><option>Paid</option><option>Partial</option><option>Overdue</option><option>Unpaid</option></select>
+    <select><option>All Status</option>${allowedInvoiceStatuses(currentUserId).map(s=>`<option>${s[0].toUpperCase()+s.slice(1)}</option>`).join('')}</select>
   </div>
   <div class="card" style="margin-bottom:26px;">
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>Invoice</th><th>Student</th><th>Course</th><th>Total</th><th>Paid</th><th>Due</th><th>Due Date</th><th>Status</th></tr></thead>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Invoice</th><th>Student</th><th>Course</th><th>Total</th><th>Paid</th><th>Due</th><th>Due Date</th><th>Status</th><th></th></tr></thead>
     <tbody>${invRows}</tbody></table></div>
   </div>
 
@@ -60,6 +65,22 @@ function renderInvoices(){
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Receipt</th><th>Student</th><th>Amount</th><th>Method</th><th>Channel</th><th>Collected By / Txn ID</th><th>Date</th><th>Status</th><th></th></tr></thead>
     <tbody>${payRows}</tbody></table></div>
   </div>`;
+}
+
+function changeInvoiceStatusModal(id){
+  const inv = DB.feeInvoices.find(x=>x.id===id); if(!inv) return;
+  const s = studentById(inv.student_id);
+  openModal({
+    title:'Change Invoice Status', sub:`${inv.invoice_no} — ${s?.name||''} · current: ${inv.status}`,
+    body:`<div class="form-grid single">
+      <div class="field"><label>New Status *</label><select id="cisNewStatus">
+        ${INVOICE_STATUSES.map(st=>`<option value="${st}" ${st===inv.status?'selected':''}>${st[0].toUpperCase()+st.slice(1)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Reason / Notes *</label><textarea id="cisReason" placeholder="Why is this invoice's status being manually changed?"></textarea></div>
+    </div>
+    <div class="badge badge-amber" style="white-space:normal;text-align:left;margin-top:10px;">${icon('alertCircle')} Manual overrides are logged in the Audit Log. Prefer "Record Payment" for normal collections — use this only for corrections, write-offs or cancellations.</div>`,
+    foot:`<button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-primary" data-action="save-change-invoice-status" data-id="${inv.id}">${icon('check')} Update Status</button>`
+  });
 }
 
 function invoiceDetailModal(id){
@@ -161,7 +182,7 @@ function collectResultsHtml(query){
     const inv = invoiceForStudent(s.id);
     const enr = primaryEnrollment(s);
     return `<tr>
-      <td>${avatarHtml(s.name,'sm')}</td>
+      <td>${avatarHtml(s.name,'sm',s.photo)}</td>
       <td><span class="cell-strong">${s.name}</span><div class="cell-sub">${s.code} · ${s.phone}</div></td>
       <td>${courseName(enr?.course_id)}</td>
       <td>${batchName(enr?.batch_id)}</td>

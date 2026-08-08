@@ -2,6 +2,32 @@
    Administration — Notifications, Users & Roles (RBAC), Audit Log, Settings
    ============================================================ */
 
+/* ---------------- MY PROFILE (topbar user-chip → any logged-in admin/staff user) ---------------- */
+function myProfileModal(userId){
+  const u = DB.users.find(x=>x.id===userId); if(!u) return;
+  openModal({
+    title:'My Profile', sub:'Your account details — update your profile photo here',
+    body:`<div style="text-align:center;max-width:320px;margin:0 auto;">
+      ${profilePhotoBlockHtml(u.name, u.photo, {inputId:'myProfilePhotoInput', previewId:'myProfilePhotoPreview', removeAction:'remove-my-profile-photo'})}
+      <b style="display:block;margin:14px 0 2px;font-size:15px;">${u.name}</b>
+      <span class="cell-sub">${roleName(u.role_id)}</span>
+    </div>
+    <div class="hr"></div>
+    <div class="form-grid">
+      <div class="field"><label>Phone</label><div>${u.phone||'—'}</div></div>
+      <div class="field"><label>Email</label><div>${u.email||'—'}</div></div>
+      <div class="field span-2"><label>Status</label><div>${statusBadge(u.status)}</div></div>
+    </div>`
+  });
+  wireProfilePhotoInput('myProfilePhotoInput', (dataUrl)=>{
+    setUserPhoto(userId, dataUrl);
+    if(userId===currentUserId) paintAvatarEl(document.querySelector('#userChip .avatar'), u.name, dataUrl);
+    myProfileModal(userId);
+    refreshCurrentView();
+    toast('Profile photo updated');
+  });
+}
+
 /* ---------------- NOTIFICATIONS ---------------- */
 function renderNotifications(){
   const rows = DB.notifications.map(n=>`
@@ -50,7 +76,7 @@ function renderNotifications(){
 function renderUsers(){
   const userRows = DB.users.map(u=>`
     <tr>
-      <td>${avatarHtml(u.name,'sm')}</td>
+      <td>${avatarHtml(u.name,'sm',u.photo)}</td>
       <td class="cell-strong">${u.name}</td>
       <td>${u.email}</td>
       <td>${u.phone}</td>
@@ -106,11 +132,72 @@ function roleMatrixModal(roleId){
   const role = DB.roles.find(r=>r.id===roleId); if(!role) return;
   const matrix = DB.rolePermMatrix[roleId];
   openModal({ size:'xl', title:`${role.name} — Default Permission Matrix`, sub:role.desc + ' · These are role-level defaults; use Access Control to override for a specific person.',
-    body:`<div class="table-wrap"><table class="data-table"><thead><tr><th>Module</th>${DB.permActions.map(a=>`<th style="text-align:center;">${a}</th>`).join('')}</tr></thead><tbody>
+    body:`<div class="table-wrap" style="margin-bottom:22px;"><table class="data-table"><thead><tr><th>Module</th>${DB.permActions.map(a=>`<th style="text-align:center;">${a}</th>`).join('')}</tr></thead><tbody>
       ${DB.permModules.map(m=>`<tr><td class="cell-strong">${m}</td>${DB.permActions.map(a=>`<td style="text-align:center;"><input type="checkbox" ${matrix[m][a]?'checked':''} data-action="toggle-perm" data-role="${roleId}" data-mod="${m}" data-act="${a}"></td>`).join('')}</tr>`).join('')}
-    </tbody></table></div>`,
+    </tbody></table></div>
+    <h3 class="report-section-title" style="margin-top:0;">Report Access (Role Default)</h3>
+    <div class="card card-pad" style="margin-bottom:20px;">${reportAccessGridHtml(roleId, true)}</div>
+    <h3 class="report-section-title">List / Data Visibility (Role Default)</h3>
+    <div class="card card-pad" style="margin-bottom:8px;">${listAccessGridHtml(roleId, true)}</div>
+    <div class="badge badge-gray" style="white-space:normal;text-align:left;margin-top:10px;">${icon('shield')} Admin Panel Access for Coordinators/Teachers is managed per-user in Access Control, since a role may include some staff who should stay portal-only and others who shouldn't.</div>`,
     foot:`<button class="btn btn-secondary" onclick="closeModal()">Close</button><button class="btn btn-primary" onclick="closeModal();toast('Role defaults updated (demo)')">${icon('check')} Save Changes</button>`
   });
+}
+
+/* ---------------- Report Access & List Visibility — shared grids used for BOTH role defaults and per-user overrides ---------------- */
+function reportAccessGridHtml(id, isRole){
+  const mod = 'Reports';
+  return REPORTS.map(g=>`
+    <div style="margin-bottom:14px;">
+      <b style="font-size:12px;display:block;margin-bottom:6px;color:var(--gray-600);text-transform:uppercase;letter-spacing:.02em;">${g.sec}</b>
+      <div class="grid grid-4" style="gap:6px;">
+        ${g.items.map(r=>{
+          const key = 'Report_'+r.id;
+          const val = isRole ? !!DB.rolePermMatrix[id][mod][key] : effectivePerm(id, mod, key);
+          const isOverridden = !isRole && DB.userPermOverrides[id]?.[mod]?.[key] !== undefined;
+          return `<label class="flex-gap" style="cursor:pointer;font-size:12px;padding:5px 8px;border-radius:8px;${isOverridden?'background:var(--primary-50);':''}">
+            <input type="checkbox" ${val?'checked':''} data-action="${isRole?'toggle-role-report-perm':'toggle-user-report-perm'}" data-${isRole?'role':'userid'}="${id}" data-reportid="${r.id}"> <span>${r.t}</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+}
+function listAccessGridHtml(id, isRole){
+  const col = (mod, keys, label) => `<div>
+    <b style="font-size:12.5px;display:block;margin-bottom:8px;">${label}</b>
+    <div class="flex-gap" style="flex-wrap:wrap;gap:8px;">
+      ${keys.map(k=>{
+        const key = 'List_'+k;
+        const val = isRole ? !!DB.rolePermMatrix[id][mod][key] : effectivePerm(id, mod, key);
+        const isOverridden = !isRole && DB.userPermOverrides[id]?.[mod]?.[key] !== undefined;
+        return `<label class="flex-gap" style="cursor:pointer;font-size:12.5px;padding:6px 10px;border-radius:8px;border:1px solid var(--gray-200);${isOverridden?'background:var(--primary-50);':''}">
+          <input type="checkbox" ${val?'checked':''} data-action="${isRole?'toggle-role-list-perm':'toggle-user-list-perm'}" data-${isRole?'role':'userid'}="${id}" data-mod="${mod}" data-key="${k}"> ${k}
+        </label>`;
+      }).join('')}
+    </div>
+  </div>`;
+  return `<div class="grid grid-2" style="gap:20px;">
+    ${col('Payments', PAYMENT_LIST_KEYS, 'Payments — which status lists can this role/user browse')}
+    ${col('Students', STUDENT_LIST_KEYS, 'Students — which status lists can this role/user browse')}
+  </div>`;
+}
+function adminPanelAccessCardHtml(userId){
+  const u = DB.users.find(x=>x.id===userId); if(!u) return '';
+  const val = effectivePerm(userId,'Users','AdminPanelAccess');
+  const isOverridden = DB.userPermOverrides[userId]?.['Users']?.['AdminPanelAccess'] !== undefined;
+  return `<div class="card card-pad" style="margin-bottom:20px;${val?'':'background:var(--danger-50);border-color:#fecaca;'}">
+    <div class="flex-between" style="flex-wrap:wrap;gap:10px;">
+      <div style="max-width:520px;">
+        <b style="display:block;font-size:13px;">${icon('shield')} Admin Panel Access</b>
+        <span class="cell-sub">${u.role_id===5 ? 'Coordinators/Teachers use the dedicated Teacher Portal (teacher-portal.html) by default and cannot log into this admin panel. Enable this to grant this specific teacher full admin-panel access instead.' : 'Controls whether this user can log into the admin panel at all.'}</span>
+      </div>
+      <label class="flex-gap" style="cursor:pointer;">
+        <input type="checkbox" ${val?'checked':''} data-action="toggle-user-adminpanel-access" data-userid="${userId}">
+        <span class="badge ${val?'badge-green':'badge-red'}">${val?'Admin Panel Allowed':'Portal-Only (Admin Panel Blocked)'}</span>
+        ${isOverridden?'<span class="badge badge-amber">Custom</span>':''}
+      </label>
+    </div>
+  </div>`;
 }
 
 /* ---------------- ACCESS CONTROL (per-user overrides — the granular RBAC screen) ---------------- */
@@ -145,7 +232,7 @@ function accessControlBodyHtml(userId){
   return `
   <div class="flex-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
     <div class="flex-gap">
-      ${avatarHtml(u.name)}
+      ${avatarHtml(u.name,'',u.photo)}
       <div><b style="display:block;font-size:14px;">${u.name}</b><span class="cell-sub">${roleName(u.role_id)} · role default applies unless overridden below</span></div>
     </div>
     <div class="flex-gap">
@@ -154,8 +241,9 @@ function accessControlBodyHtml(userId){
       <button class="btn btn-secondary btn-sm" data-action="preview-as-user" data-id="${u.id}">${icon('eye')} Preview App as This User</button>
     </div>
   </div>
+  ${adminPanelAccessCardHtml(userId)}
   <div class="card" style="margin-bottom:20px;">
-    <div class="card-header"><h3>Menu / Page & Action Permissions</h3><p>Checked = this user can access that page/action. Highlighted cells are custom overrides for this user only.</p></div>
+    <div class="card-header"><h3>Menu / Page & Action Permissions</h3><p>Checked = this user can access that page/action. Highlighted cells are custom overrides for this user only. The "Change Status" column is deliberately separate from "Edit" — e.g. someone can edit a student's profile without being allowed to change their status.</p></div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Module (Menu / Page)</th>${DB.permActions.map(a=>`<th style="text-align:center;">${a}</th>`).join('')}</tr></thead><tbody>
     ${DB.permModules.map(m=>`<tr><td class="cell-strong">${m}</td>${DB.permActions.map(a=>{
         const isOverridden = DB.userPermOverrides[userId]?.[m]?.[a] !== undefined;
@@ -163,6 +251,14 @@ function accessControlBodyHtml(userId){
         return `<td style="text-align:center;${isOverridden?'background:var(--primary-50);':''}"><input type="checkbox" ${val?'checked':''} data-action="toggle-user-perm" data-userid="${userId}" data-mod="${m}" data-act="${a}"></td>`;
       }).join('')}</tr>`).join('')}
     </tbody></table></div>
+  </div>
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header"><h3>Report Access</h3><p>A report is completely hidden/blocked in Reports & Analytics unless individually checked here — not every report is accessible to every user.</p></div>
+    <div class="card-pad">${reportAccessGridHtml(userId, false)}</div>
+  </div>
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header"><h3>List / Data Visibility Permissions</h3><p>Fine-grained control over which status-filtered lists this user can browse (e.g. Paid vs Due invoices, Active vs Dropped students) — independent from the base module View permission above.</p></div>
+    <div class="card-pad">${listAccessGridHtml(userId, false)}</div>
   </div>
   ${isTeacher ? `
   <div class="card">
@@ -303,6 +399,9 @@ function settingsPane(tab){
         <div class="field"><label>Minimum first payment</label><input type="text" value="30% of total course fee"></div>
         <div class="field"><label>Refund policy window</label><input type="text" value="Within 14 days, 10% deduction"></div>
         <div class="field"><label>Low attendance threshold</label><input type="text" value="Below 70% triggers alert + blocks certificate"></div>
+        <div class="field"><label>Teacher payment approval</label><input type="text" value="Any amount requires Admin/Manager approval before disbursement"></div>
+        <div class="field"><label>Batch capacity rule</label><input type="text" value="A batch's capacity can never exceed its assigned lab's capacity — enforced on create/edit"></div>
+        <div class="field"><label>Student enrollment limit</label><input type="text" value="Blocked automatically once a batch reaches its lab's seat capacity"></div>
         <div class="field"><label>Portal login without email</label><div>${statusBadge('active','Phone + OTP enabled')}</div></div>
       </div>
       <div class="hr"></div>

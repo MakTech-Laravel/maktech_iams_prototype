@@ -11,7 +11,7 @@
 <body>
 
 <div class="prototype-banner">🧪 <b>Visual Prototype</b> — student self-service portal demo. &nbsp;|&nbsp;
-  <a href="index.html">Open Admin Panel ↗</a> &nbsp;|&nbsp; <a href="verify.html">Certificate Verify Page ↗</a>
+  <a href="index.html">Open Admin Panel ↗</a> &nbsp;|&nbsp; <a href="teacher-portal.html">Teacher Portal ↗</a> &nbsp;|&nbsp; <a href="verify.html">Certificate Verify Page ↗</a>
 </div>
 
 <!-- ================= AUTH SCREEN ================= -->
@@ -89,26 +89,37 @@
 </div>
 
 <!-- ================= PORTAL SHELL ================= -->
-<div class="portal-shell" id="portalShell" style="display:none;">
-  <header class="portal-topbar">
-    <div class="flex-gap">
-      <div class="mark logo-chip" style="width:34px;height:34px;"><img src="assets/logo.svg" alt="MakTech logo"></div>
-      <b style="font-size:14.5px;">MakTech IAMS Portal</b>
+<div class="app-shell portal-app-shell" id="portalShell" style="display:none;">
+  <aside class="sidebar" id="portalSidebar">
+    <div class="sidebar-brand">
+      <div class="mark logo-chip"><img src="assets/logo.svg" alt="MakTech logo"></div>
+      <div class="txt"><b>MakTech IAMS</b><span>Student Portal</span></div>
     </div>
-    <nav class="portal-nav" id="portalNav"></nav>
-    <div class="flex-gap" style="margin-left:auto;">
-      <button class="icon-btn" id="portalBell"><span class="dot"></span></button>
-      <div class="user-chip" id="portalUserChip" data-action="pgo" data-pview="profile">
-        <div class="avatar sm" id="portalAvatar">FA</div>
-        <div class="who"><b id="portalUserName">Farzana Akter</b><span id="portalUserCode">MT-2026-0001</span></div>
-      </div>
-      <button class="btn btn-secondary btn-sm" id="btnLogout">${'' }Logout</button>
-    </div>
-  </header>
-  <nav class="portal-nav-mobile" id="portalNavMobile"></nav>
+    <nav id="portalNav"><!-- populated by portal.js --></nav>
+    <div class="sidebar-footer">Student Self-Service Portal &middot; v0.1</div>
+  </aside>
 
-  <main class="portal-content" id="portalContent"></main>
+  <div class="main-col">
+    <header class="topbar">
+      <button class="icon-btn hamburger" id="btnPortalHamburger"></button>
+      <div>
+        <div class="page-title" id="portalPageTitle">Dashboard</div>
+        <div class="page-sub" id="portalPageSub">Welcome back!</div>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" id="portalBell"><span class="dot"></span></button>
+        <div class="user-chip" id="portalUserChip" data-action="pgo" data-pview="profile">
+          <div class="avatar sm" id="portalAvatar">FA</div>
+          <div class="who"><b id="portalUserName">Farzana Akter</b><span id="portalUserCode">MT-2026-0001</span></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btnLogout">Logout</button>
+      </div>
+    </header>
+
+    <main class="portal-content" id="portalContent"></main>
+  </div>
 </div>
+<div class="sidebar-scrim" id="portalSidebarScrim"></div>
 
 <div class="overlay" id="modalOverlay">
   <div class="modal" id="modalBox">
