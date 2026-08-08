@@ -8,5 +8,9 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "playwright": "^1.62.1"
+  }
 }

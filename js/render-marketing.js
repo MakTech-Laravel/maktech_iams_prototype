@@ -4,10 +4,11 @@
 
 /* ---------------- LEADS LIST ---------------- */
 function renderLeads(){
+  const canCreate = effectivePerm(currentUserId,'Leads/CRM','Create');
   const rows = DB.leads.map(l=>`
     <tr class="row-link" data-action="view-lead" data-id="${l.id}">
       <td>${avatarHtml(l.name,'sm')}</td>
-      <td><span class="cell-strong">${l.name}</span><div class="cell-sub">${l.phone}</div></td>
+      <td><span class="cell-strong">${l.name}</span>${l.imported?` <span class="badge badge-gray" title="Added via bulk import">${icon('upload')}</span>`:''}<div class="cell-sub">${l.phone}</div></td>
       <td>${institutionName(l.institution_id)}</td>
       <td>${courseName(l.interested_course_id)}</td>
       <td><span class="badge badge-gray">${SOURCE_LABELS[l.source]}</span></td>
@@ -21,6 +22,7 @@ function renderLeads(){
     <div><h1>Leads</h1><p>All captured leads across institutes, campaigns, referrals & walk-ins (${DB.leads.length} total)</p></div>
     <div class="view-actions">
       <button class="btn btn-secondary btn-sm">${icon('download')} Export</button>
+      ${canCreate?`<button class="btn btn-secondary btn-sm" data-action="open-lead-import">${icon('upload')} Import Leads</button>`:''}
       <button class="btn btn-primary btn-sm" data-action="open-add-lead">${icon('plus')} Add Lead</button>
     </div>
   </div>

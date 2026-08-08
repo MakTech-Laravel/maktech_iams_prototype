@@ -123,6 +123,14 @@ function kpiCard(iconName, label, value, trend, color){
   </div>`;
 }
 
+/* Escapes untrusted text before it goes into an innerHTML template. Needed anywhere we render content that
+   came from outside the app (uploaded spreadsheets, pasted data) rather than from the seeded DB. */
+function escHtml(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /* ---------------- Avatar initials / photo ---------------- */
 function initials(name){ return (name||'?').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase(); }
 function avatarHtml(name, size, photo){

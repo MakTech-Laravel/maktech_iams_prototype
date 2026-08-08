@@ -105,7 +105,7 @@ function buildSidebar(userId){
     if(items.length===1){
       const it = items[0];
       return `<div class="nav-group">
-        <div class="nav-item" data-action="go-view" data-view="${it.id}">
+        <div class="nav-item ${it.id===currentView?'active':''}" data-action="go-view" data-view="${it.id}">
           ${icon(it.ic)}<span>${it.label}</span>
           ${it.count ? `<span class="badge-count">${it.count()}</span>` : ''}
         </div>
@@ -122,7 +122,7 @@ function buildSidebar(userId){
         </div>
         <div class="nav-submenu">
           ${items.map(it=>`
-            <div class="nav-item sub" data-action="go-view" data-view="${it.id}">
+            <div class="nav-item sub ${it.id===currentView?'active':''}" data-action="go-view" data-view="${it.id}">
               ${icon(it.ic)}
               <span>${it.label}</span>
               ${it.count ? `<span class="badge-count">${it.count()}</span>` : ''}
@@ -277,6 +277,25 @@ document.addEventListener('click', function(e){
       closeModal(); toast('Lead saved successfully'); refreshCurrentView();
       break;
     }
+    /* ---- bulk lead import wizard ---- */
+    case 'open-lead-import':
+      if(!effectivePerm(currentUserId,'Leads/CRM','Create')){ toast("You don't have permission to add leads", 'error'); break; }
+      openLeadImport();
+      break;
+    case 'li-use-paste': {
+      const text = document.getElementById('liPasteBox')?.value || '';
+      if(!text.trim()){ toast('Paste some rows first', 'error'); break; }
+      liLoadText(text, 'Pasted data');
+      break;
+    }
+    case 'li-download-template': liDownloadTemplate(); break;
+    case 'li-back-to-upload': if(LeadImportState){ LeadImportState.step = 1; renderLeadImportModal(); } break;
+    case 'li-back-to-mapping': if(LeadImportState){ LeadImportState.step = 2; renderLeadImportModal(); } break;
+    case 'li-goto-preview': liGotoPreview(); break;
+    case 'li-select-valid': liSetSelection('valid'); break;
+    case 'li-select-none': liSetSelection('none'); break;
+    case 'li-commit': liCommitImport(); break;
+
     case 'open-contact-log': contactLogModal(id, t.dataset.status); break;
     case 'open-complete-followup': {
       const f = DB.followUps.find(x=>x.id===id);

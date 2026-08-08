@@ -53,8 +53,25 @@
   --gray-900:#0f172a;
 
   --bg-app:#f6f5f3;
-  --bg-sidebar:#111111;
-  --bg-sidebar-hover:#241a12;
+  /* ---- Sidebar theme ----
+     Every sidebar colour is a token so the whole nav can be re-skinned from this one block. Keep the text
+     tints in the same temperature family as the background: the previous build paired cool blue-grey text
+     with a neutral-black panel and a warm-brown hover, and that mismatch is what made it look muddy. */
+  --bg-sidebar:#141b2e;
+  --bg-sidebar-hover:rgba(255,255,255,.07);
+  --sidebar-text:#aeb8d4;          /* resting nav item — 8.65:1 on the navy, comfortably AAA */
+  --sidebar-text-strong:#e8ecf8;   /* group headers, brand, hover */
+  --sidebar-muted:#7b87a8;         /* section labels + footer — 4.79:1, AA */
+  --sidebar-border:rgba(255,255,255,.09);
+  --sidebar-badge:rgba(255,255,255,.14);
+
+  /* Alternative sidebar palettes — swap the seven values above for any block below.
+     Graphite slate (neutral, less colour commitment):
+       #1e2530 / rgba(255,255,255,.07) / #b3bcc9 / #f1f4f8 / #7e8896 / rgba(255,255,255,.09) / rgba(255,255,255,.14)
+     Warm espresso (monochrome with the orange brand):
+       #231c19 / rgba(255,145,98,.13) / #c6b8b0 / #fbf1ec / #8e7d74 / rgba(255,255,255,.09) / rgba(255,255,255,.14)
+     Light (white nav; note the orange active bar reads much louder on white):
+       #ffffff / #fff3ee / #475569 / #0f172a / #94a3b8 / #e8e6e2 / #f1f5f9 */
   --bg-card:#ffffff;
 
   --radius-sm:6px;
@@ -137,7 +154,7 @@ body{ padding-top:var(--banner-h); }
 .sidebar{
   width:var(--sidebar-w);
   background:var(--bg-sidebar);
-  color:#cbd3f5;
+  color:var(--sidebar-text);
   flex-shrink:0;
   display:flex;
   flex-direction:column;
@@ -150,8 +167,8 @@ body{ padding-top:var(--banner-h); }
 .sidebar-brand{
   display:flex; align-items:center; gap:10px;
   padding:20px 20px 16px;
-  color:#fff;
-  border-bottom:1px solid rgba(255,255,255,.08);
+  color:var(--sidebar-text-strong);
+  border-bottom:1px solid var(--sidebar-border);
 }
 .sidebar-brand .mark{
   width:36px; height:36px; border-radius:10px;
@@ -167,29 +184,29 @@ body{ padding-top:var(--banner-h); }
 .logo-chip img{ width:78%; height:78%; object-fit:contain; display:block; }
 .sidebar-brand .txt{ line-height:1.2; }
 .sidebar-brand .txt b{ font-size:14.5px; display:block; }
-.sidebar-brand .txt span{ font-size:11px; color:#8b94c9; }
+.sidebar-brand .txt span{ font-size:11px; color:var(--sidebar-muted); }
 
 .nav-group{ padding:4px 12px; }
 .nav-group-label{
   font-size:10.5px; text-transform:uppercase; letter-spacing:.08em;
-  color:#6c76ad; padding:14px 12px 6px;
+  color:var(--sidebar-muted); padding:14px 12px 6px;
   font-weight:700;
 }
 .nav-item{
   display:flex; align-items:center; gap:11px;
   padding:9px 12px; border-radius:10px;
-  font-size:13.4px; font-weight:500; color:#b8c0e8;
+  font-size:13.4px; font-weight:500; color:var(--sidebar-text);
   cursor:pointer; margin-bottom:1px; position:relative;
   white-space:nowrap;
 }
 .nav-item .ic{ width:18px; height:18px; flex-shrink:0; opacity:.85; transition:transform var(--t-med) var(--ease); }
-.nav-item:hover{ background:var(--bg-sidebar-hover); color:#fff; transform:translateX(2px); }
+.nav-item:hover{ background:var(--bg-sidebar-hover); color:var(--sidebar-text-strong); transform:translateX(2px); }
 .nav-item:hover .ic{ transform:scale(1.08); }
 .nav-item.active{ background:linear-gradient(135deg,var(--primary-600),var(--primary-700)); color:#fff; box-shadow:var(--shadow-md); }
 .nav-item.active:hover{ transform:none; }
 .nav-item.active .ic{ opacity:1; }
 .nav-item .badge-count{
-  margin-left:auto; background:rgba(255,255,255,.15); font-size:10.5px;
+  margin-left:auto; background:var(--sidebar-badge); font-size:10.5px;
   padding:1px 7px; border-radius:20px; font-weight:700;
 }
 .nav-item.active .badge-count{ background:rgba(255,255,255,.28); }
@@ -199,16 +216,16 @@ body{ padding-top:var(--banner-h); }
 .nav-group-header{
   display:flex; align-items:center; gap:11px;
   padding:10px 12px; border-radius:10px;
-  font-size:13.2px; font-weight:700; color:#dbe0f7;
+  font-size:13.2px; font-weight:700; color:var(--sidebar-text-strong);
   cursor:pointer; user-select:none; white-space:nowrap;
 }
 .nav-group-header .ic{ width:18px; height:18px; flex-shrink:0; opacity:.9; }
 .nav-group-header:hover{ background:var(--bg-sidebar-hover); }
 .nav-item.sub{ transition:background var(--t-fast) var(--ease), color var(--t-fast) var(--ease), padding-left var(--t-fast) var(--ease); }
 .nav-item.sub:hover{ padding-left:33px; }
-.nav-group-header.has-active{ color:#fff; }
+.nav-group-header.has-active{ color:var(--sidebar-text-strong); }
 .nav-group-header .badge-count{
-  margin-left:auto; background:rgba(255,255,255,.15); font-size:10.5px;
+  margin-left:auto; background:var(--sidebar-badge); font-size:10.5px;
   padding:1px 7px; border-radius:20px; font-weight:700;
 }
 .nav-group-header .chev{ margin-left:auto; width:14px; height:14px; opacity:.55; transition:transform .18s ease; flex-shrink:0; }
@@ -220,8 +237,8 @@ body{ padding-top:var(--banner-h); }
 .nav-item.sub .ic{ width:15px; height:15px; }
 
 .sidebar-footer{
-  margin-top:auto; padding:14px 16px; border-top:1px solid rgba(255,255,255,.08);
-  font-size:11.5px; color:#6c76ad;
+  margin-top:auto; padding:14px 16px; border-top:1px solid var(--sidebar-border);
+  font-size:11.5px; color:var(--sidebar-muted);
 }
 
 .main-col{ margin-left:var(--sidebar-w); flex:1; min-width:0; display:flex; flex-direction:column; }
@@ -405,6 +422,77 @@ table.data-table tbody tr:last-child td{ border-bottom:none; }
 .modal-foot{ padding:16px 22px; border-top:1px solid var(--gray-100); display:flex; justify-content:flex-end; gap:10px; }
 .close-x{ width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; color:var(--gray-500); background:var(--gray-100); flex-shrink:0; }
 .close-x:hover{ background:var(--gray-200); transform:rotate(90deg); }
+
+/* ---------- Bulk import wizard ---------- */
+.li-steps{ display:flex; align-items:center; gap:10px; margin-bottom:18px; flex-wrap:wrap; }
+.li-step{ display:flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600; color:var(--gray-400); }
+.li-step.active{ color:var(--primary-600); }
+.li-step.done{ color:var(--success-700); }
+.li-step-num{ width:21px; height:21px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:11px; background:var(--gray-100); color:var(--gray-500); }
+.li-step.active .li-step-num{ background:var(--primary-500); color:#fff; }
+.li-step.done .li-step-num{ background:var(--success-50); color:var(--success-700); }
+.li-step-sep{ flex:1; min-width:16px; height:1px; background:var(--gray-200); }
+
+.li-drop{ border:2px dashed var(--gray-200); border-radius:14px; padding:28px 20px; text-align:center; transition:.15s var(--ease); background:var(--gray-50); }
+.li-drop.over{ border-color:var(--primary-500); background:var(--primary-50); }
+.li-drop-ic{ width:44px; height:44px; margin:0 auto 10px; border-radius:12px; background:var(--primary-50); color:var(--primary-600); display:flex; align-items:center; justify-content:center; }
+.li-drop-ic svg{ width:21px; height:21px; }
+.li-or{ display:flex; align-items:center; gap:12px; margin:18px 0 12px; color:var(--gray-400); font-size:12px; }
+.li-or::before, .li-or::after{ content:''; flex:1; height:1px; background:var(--gray-200); }
+.li-paste{ width:100%; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; white-space:pre; }
+
+.li-map-table td{ vertical-align:middle; }
+.li-map-table select, .li-fixed-input{ width:100%; }
+.li-sample{ background:var(--gray-100); border-radius:5px; padding:1px 5px; font-size:11.5px; }
+
+.li-summary{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.li-sum-chip{ font-size:12px; padding:6px 11px; border-radius:9px; background:var(--gray-100); color:var(--gray-600); }
+.li-sum-chip b{ color:var(--gray-900); }
+.li-sum-chip.green{ background:var(--success-50); color:var(--success-700); } .li-sum-chip.green b{ color:var(--success-700); }
+.li-sum-chip.amber{ background:var(--warning-50); color:var(--warning-700); } .li-sum-chip.amber b{ color:var(--warning-700); }
+.li-sum-chip.purple{ background:var(--violet-50); color:var(--violet-700); } .li-sum-chip.purple b{ color:var(--violet-700); }
+.li-sum-chip.red{ background:var(--danger-50); color:var(--danger-700); } .li-sum-chip.red b{ color:var(--danger-700); }
+
+.li-fieldbar{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding:11px 13px; background:var(--gray-50); border-radius:11px; }
+.li-fieldbar-label{ font-size:12px; font-weight:600; color:var(--gray-600); margin-right:2px; }
+.li-chip{ display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:5px 10px; border-radius:8px; border:1px solid var(--gray-200); background:#fff; color:var(--gray-500); cursor:pointer; }
+.li-chip.on{ border-color:var(--primary-500); background:var(--primary-50); color:var(--primary-600); font-weight:600; }
+.li-chip.locked{ cursor:default; opacity:.9; }
+.li-chip input{ margin:0; }
+
+.modal.li-wide{ width:1300px; max-width:96vw; }
+.li-note{ white-space:normal; align-items:flex-start; line-height:1.55; font-weight:600; }
+.li-note svg{ flex-shrink:0; margin-top:2px; }
+
+.li-preview-wrap{ max-height:44vh; overflow:auto; border:1px solid var(--gray-100); border-radius:11px; }
+.li-preview-table{ font-size:12.2px; width:100%; }
+.li-preview-table thead th{ position:sticky; top:0; z-index:2; background:var(--gray-50); }
+.li-preview-table td, .li-preview-table th{ padding:8px 10px; white-space:nowrap; }
+
+/* With every field switched on the grid is wider than any modal, so the two columns the operator acts on —
+   the include tick and the warnings — are pinned to the edges instead of scrolling out of sight. */
+.li-preview-table th:first-child, .li-preview-table td:first-child{ position:sticky; left:0; z-index:1; background:#fff; }
+.li-preview-table th:last-child, .li-preview-table td.li-notes-cell{
+  position:sticky; right:0; z-index:1; background:#fff;
+  white-space:normal; min-width:210px; box-shadow:-7px 0 9px -7px rgba(15,23,42,.18);
+}
+.li-preview-table thead th:first-child, .li-preview-table thead th:last-child{ z-index:3; background:var(--gray-50); }
+/* Pinned cells need the row tint painted on solid, since the sticky background hides the row's own. */
+.li-row.li-duplicate td:first-child, .li-row.li-duplicate td.li-notes-cell{ background:#f9f7ff; }
+.li-row.li-error td:first-child, .li-row.li-error td.li-notes-cell{ background:#fef6f6; }
+.li-row.li-duplicate{ background:rgba(139,92,246,.05); }
+.li-row.li-error{ background:rgba(239,68,68,.05); }
+.li-issue{ font-size:11px; line-height:1.5; }
+.li-issue.warn{ color:var(--warning-700); }
+.li-issue.dup{ color:var(--violet-700); }
+.li-issue.error{ color:var(--danger-700); font-weight:600; }
+.li-missing{ color:var(--danger-700); font-size:11.5px; font-weight:600; }
+.li-warned{ color:var(--warning-700); }
+/* Clamped rather than letting the table size to content: course and institution names are long enough to
+   push the warnings column off screen, and unnoticed warnings defeat the point of a preview. */
+.li-cell{ display:inline-block; min-width:34px; max-width:165px; min-height:17px; padding:1px 5px; margin:-1px -5px; border-radius:5px; cursor:text; border:1px solid transparent; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+.li-cell:hover{ background:var(--primary-50); border-color:var(--primary-200); }
+.li-cell-edit{ width:100%; min-width:110px; font-size:12px; padding:3px 6px; }
 
 .drawer-overlay{ position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:100; display:none; }
 .drawer-overlay.show{ display:block; }

@@ -1,0 +1,4 @@
+node_modules/
+shots/
+_fixtures/
+_test_output.txt

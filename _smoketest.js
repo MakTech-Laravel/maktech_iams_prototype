@@ -316,6 +316,138 @@ console.log('=== ADMIN ERP (index.html) ===');
   click(win, '[data-action="save-lead"]');
   check('New lead actually persisted', win.DB.leads.length === leadsBefore + 1 && win.DB.leads.some(l=>l.name==='Smoke Test Lead'));
 
+  // ---- Bulk lead import: parser ----
+  const csvParsed = win.parseDelimitedText('Name,Mobile No,College\n"Hossain, Md. Karim",01712345678,Dhaka Polytechnic Institute\nAyesha Siddiqua,01812345679,Rajshahi Polytechnic Institute');
+  check('CSV parser reads headers', csvParsed.headers.join('|') === 'Name|Mobile No|College');
+  check('CSV parser reads rows', csvParsed.rows.length === 2);
+  check('CSV parser respects quoted commas', csvParsed.rows[0]['Name'] === 'Hossain, Md. Karim');
+  const tsvParsed = win.parseDelimitedText('Name\tPhone\nKarim\t01712345678');
+  check('Tab-separated (pasted-from-Excel) data auto-detected', tsvParsed.delimiter === '\t' && tsvParsed.rows[0]['Phone'] === '01712345678');
+
+  // ---- Bulk lead import: auto-mapping of arbitrary headers ----
+  const autoMap = win.autoMapColumns(['Full Name','Mobile No','E-mail','College','Interested Trade','Nothing Relevant']);
+  check('Auto-map matches "Full Name" -> name', autoMap.name === 'Full Name');
+  check('Auto-map matches "Mobile No" -> phone', autoMap.phone === 'Mobile No');
+  check('Auto-map matches "E-mail" -> email', autoMap.email === 'E-mail');
+  check('Auto-map matches "College" -> institution', autoMap.institution_id === 'College');
+  check('Auto-map leaves unknown columns unmapped', !Object.values(autoMap).includes('Nothing Relevant'));
+
+  // ---- Bulk lead import: full wizard flow through the UI ----
+  win.navigate('leads');
+  check('Import Leads button visible to a user with Create permission', doc.querySelector('[data-action="open-lead-import"]') !== null);
+  click(win, '[data-action="open-lead-import"]');
+  check('Import wizard opens on the upload step', doc.getElementById('liDrop') !== null && doc.getElementById('liPasteBox') !== null);
+
+  // Paste rows: deliberately messy — an unknown institution, a bad date, a blank name and a duplicate phone.
+  const dupPhone = win.DB.leads[0].phone;
+  doc.getElementById('liPasteBox').value = [
+    'Full Name\tMobile No\tE-mail\tCollege\tCaptured On',
+    'Rafiul Karim\t01755500011\trafiul@example.com\tDhaka Polytechnic Institute\t12/03/2026',
+    'Nadia Akter\t01755500012\t\tNo Such College\t2026-08-01',
+    '\t01755500013\t\tDhaka Polytechnic Institute\t2026-08-01',
+    'Duplicate Person\t' + dupPhone + '\t\tDhaka Polytechnic Institute\t2026-08-01'
+  ].join('\n');
+  click(win, '[data-action="li-use-paste"]');
+  check('Wizard advances to the mapping step', doc.querySelector('.li-map-table') !== null);
+  check('Mapping step reports the parsed row count', doc.getElementById('modalSub').textContent.includes('4 row(s)'));
+  check('Name column auto-mapped in the UI', win.eval('LeadImportState.mapping.name') === 'Full Name');
+  check('Phone column auto-mapped in the UI', win.eval('LeadImportState.mapping.phone') === 'Mobile No');
+
+  // Set one value for every row — the institute-visit case (whole batch shares a source).
+  const srcSelect = doc.querySelector('.li-map-select[data-key="source"]');
+  srcSelect.value = '__fixed__';
+  srcSelect.dispatchEvent(new win.Event('change', {bubbles:true}));
+  check('Choosing "same value for every row" reveals a value picker', doc.querySelector('.li-fixed-input[data-key="source"]') !== null);
+  const srcFixed = doc.querySelector('.li-fixed-input[data-key="source"]');
+  srcFixed.value = 'online';
+  srcFixed.dispatchEvent(new win.Event('change', {bubbles:true}));
+  check('Fixed value stored in wizard state', win.eval("LeadImportState.fixed.source") === 'online');
+
+  click(win, '[data-action="li-goto-preview"]');
+  check('Wizard advances to the preview step', doc.querySelector('.li-preview-table') !== null);
+
+  const prevRows = win.eval('LeadImportState.preview.rows');
+  const prevSummary = win.eval('LeadImportState.preview.summary');
+  check('Preview validates every parsed row', prevSummary.total === 4);
+  check('Row with a blank required name is flagged as an error', prevRows[2].status === 'error' && prevRows[2].include === false);
+  check('Row reusing an existing phone is flagged as a duplicate', prevRows[3].status === 'duplicate' && prevRows[3].include === false);
+  check('Unknown institution produces a warning, not a hard failure', prevRows[1].status === 'warn' && prevRows[1].values.institution_id === null);
+  check('Known institution resolved to its id', prevRows[0].values.institution_id === 1);
+  check('Day-first date parsed correctly', prevRows[0].values.created_at === '2026-03-12');
+  check('Fixed value applied to every row', prevRows.every(r => r.values.source === 'online'));
+  check('Only importable rows are pre-selected', prevSummary.selected === 2);
+
+  // Per-field include toggles — the "select dynamic field on import preview" control.
+  const emailCols = () => Array.from(doc.querySelectorAll('.li-preview-table thead th')).map(th=>th.textContent);
+  check('Email column present in the preview grid', emailCols().includes('Email'));
+  const emailToggle = doc.querySelector('.li-field-toggle[data-key="email"]');
+  emailToggle.checked = false;
+  emailToggle.dispatchEvent(new win.Event('change', {bubbles:true}));
+  check('Unticking a field removes its preview column', !emailCols().includes('Email'));
+  check('Required fields cannot be unticked', doc.querySelector('.li-field-toggle[data-key="name"]').disabled === true);
+  check('Errored row cannot be ticked for import', doc.querySelector('.li-row-toggle[data-idx="2"]').disabled === true);
+
+  // Inline cell editing — repairing bad rows without going back to Excel.
+  const nameCell = doc.querySelector('.li-cell[data-idx="2"][data-key="name"]');
+  check('Blank required cell is rendered as an editable "Missing" cell', nameCell !== null && nameCell.textContent === 'Missing');
+  clickEl(win, nameCell);
+  const nameInput = doc.querySelector('.li-cell-edit');
+  check('Clicking a cell swaps in a text input', !!nameInput && nameInput.tagName === 'INPUT');
+  nameInput.value = 'Repaired Name';
+  nameInput.dispatchEvent(new win.Event('change', {bubbles:true}));
+  check('Edited value written back to the row', win.eval('LeadImportState.preview.rows[2].values.name') === 'Repaired Name');
+  check('Repaired row is no longer an error', win.eval('LeadImportState.preview.rows[2].status') !== 'error');
+  check('Repaired row checkbox is now enabled', doc.querySelector('.li-row-toggle[data-idx="2"]').disabled === false);
+  check('Repaired row rejoins the selection automatically', win.eval('LeadImportState.preview.rows[2].include') === true);
+  check('Summary chips recount after the repair', doc.getElementById('liSummary').textContent.includes('0') && win.eval('LeadImportState.preview.summary.error') === 0);
+
+  // A lookup cell edits via a dropdown of real system values, not free text.
+  const instCell = doc.querySelector('.li-cell[data-idx="1"][data-key="institution_id"]');
+  clickEl(win, instCell);
+  const instSelect = doc.querySelector('.li-cell-edit');
+  check('Lookup cell edits through a select of real institutions', !!instSelect && instSelect.tagName === 'SELECT');
+  instSelect.value = '2';
+  instSelect.dispatchEvent(new win.Event('change', {bubbles:true}));
+  check('Unmatched institution repaired to a real id', win.eval('LeadImportState.preview.rows[1].values.institution_id') === 2);
+  check('Resolver warning cleared once the field was corrected', win.eval("LeadImportState.preview.rows[1].issues.filter(i=>i.field==='institution_id').length") === 0);
+  check('Repaired row promoted out of the warning bucket', win.eval('LeadImportState.preview.rows[1].status') === 'ready');
+
+  // Re-including the duplicate proves rows stay operator-overridable.
+  const dupToggle = doc.querySelector('.li-row-toggle[data-idx="3"]');
+  dupToggle.checked = true;
+  dupToggle.dispatchEvent(new win.Event('change', {bubbles:true}));
+  check('Duplicate row can be manually re-included', win.eval('LeadImportState.preview.rows[3].include') === true);
+  check('Selection counter updates without re-rendering the grid', doc.getElementById('liSelCount').textContent.startsWith('4 row'));
+
+  const leadsBeforeImport = win.DB.leads.length, auditBeforeImport = win.DB.auditLogs.length;
+  click(win, '[data-action="li-commit"]');
+  check('Import created exactly the selected rows', win.DB.leads.length === leadsBeforeImport + 4);
+  const imported = win.DB.leads.slice(-4);
+  check('Imported leads carry the mapped name & phone', imported[0].name === 'Rafiul Karim' && imported[0].phone === '01755500011');
+  check('Unticked field was not written', imported[0].email === null);
+  check('Fixed source applied on commit', imported.every(l => l.source === 'online'));
+  check('Imported leads are tagged as imported', imported.every(l => l.imported === true));
+  check('Import written to the audit log', win.DB.auditLogs.length === auditBeforeImport + 1 && win.DB.auditLogs[win.DB.auditLogs.length-1].action === 'import');
+  check('Wizard closed after import', doc.getElementById('modalOverlay').classList.contains('show') === false);
+  check('Imported leads are visibly tagged in the directory', doc.querySelector('#viewRoot').innerHTML.includes('Added via bulk import'));
+
+  // Bulk import writes many records at once, so it is gated on the same Create permission as adding one.
+  const uid = win.eval('currentUserId');
+  win.DB.userPermOverrides[uid] = win.DB.userPermOverrides[uid] || {};
+  win.DB.userPermOverrides[uid]['Leads/CRM'] = { Create:false };
+  win.navigate('leads');
+  check('Import button hidden from a user without Leads/CRM Create', doc.querySelector('[data-action="open-lead-import"]') === null);
+  // Hiding the button isn't enough — the handler itself must refuse, so fire the action directly.
+  const forcedBtn = doc.createElement('button');
+  forcedBtn.dataset.action = 'open-lead-import';
+  doc.body.appendChild(forcedBtn);
+  clickEl(win, forcedBtn);
+  check('Import wizard cannot be opened without the permission', doc.getElementById('liDrop') === null);
+  forcedBtn.remove();
+  delete win.DB.userPermOverrides[uid]['Leads/CRM'];
+  win.navigate('leads');
+  check('Import button returns once the permission is restored', doc.querySelector('[data-action="open-lead-import"]') !== null);
+
   // ---- Follow-ups page tabs ----
   win.navigate('followups');
   check('Follow-up tabs render', doc.querySelectorAll('[data-futab]').length === 5);

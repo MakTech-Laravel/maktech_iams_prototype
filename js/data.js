@@ -662,6 +662,415 @@ function scheduleFollowup(leadId, dueDate, dueTime, assignedTo, notes){
   return f;
 }
 
+/* ================================================================
+   BULK LEAD IMPORT (CSV / Excel / pasted spreadsheet data)
+   ================================================================
+   Marketing comes back from an institute visit or an online session with a spreadsheet of 40-100 names.
+   Typing them one by one is the bottleneck this solves. The engine below is deliberately kept free of any
+   DOM code so the parse -> map -> validate -> commit pipeline can be unit-tested and reused (the same
+   pipeline would work for a student import later).
+
+   Column headers in the wild are never consistent ("Mobile", "Contact No", "Phone Number"), so nothing is
+   hard-coded to a fixed column order: the file's own headers are read, auto-matched against the alias lists
+   in LEAD_IMPORT_FIELDS, and everything stays re-mappable by the user before anything is written. */
+
+/* ---- Delimited text parsing ---- */
+/* Hand-rolled rather than split(',') because exported lead sheets routinely contain quoted commas in
+   institution names and embedded newlines in address/notes cells. */
+function detectDelimiter(text){
+  const firstLine = String(text).split(/\r?\n/).find(l=>l.trim()!=='') || '';
+  const counts = { ',':0, '\t':0, ';':0, '|':0 };
+  let inQuotes = false;
+  for(const ch of firstLine){
+    if(ch === '"') inQuotes = !inQuotes;
+    else if(!inQuotes && counts[ch] !== undefined) counts[ch]++;
+  }
+  return Object.keys(counts).reduce((best,k)=> counts[k] > counts[best] ? k : best, ',');
+}
+
+function parseDelimitedText(text, delimiter){
+  if(text == null) return { headers:[], rows:[], delimiter:',' };
+  text = String(text).replace(/^\uFEFF/, '');
+  const delim = delimiter || detectDelimiter(text);
+  const grid = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0; i<text.length; i++){
+    const ch = text[i];
+    if(inQuotes){
+      if(ch === '"' && text[i+1] === '"'){ field += '"'; i++; }
+      else if(ch === '"') inQuotes = false;
+      else field += ch;
+    } else if(ch === '"'){ inQuotes = true; }
+    else if(ch === delim){ row.push(field); field = ''; }
+    else if(ch === '\n'){ row.push(field); grid.push(row); row = []; field = ''; }
+    else if(ch !== '\r'){ field += ch; }
+  }
+  row.push(field); grid.push(row);
+
+  const cleaned = grid.filter(r => r.some(c => String(c).trim() !== ''));
+  if(!cleaned.length) return { headers:[], rows:[], delimiter:delim };
+
+  /* Duplicate/blank headers get suffixed so they stay addressable as object keys. */
+  const used = {};
+  const headers = cleaned[0].map((h, i) => {
+    let name = String(h).trim() || `Column ${i+1}`;
+    if(used[name] !== undefined){ used[name]++; name = `${name} (${used[name]})`; } else used[name] = 1;
+    return name;
+  });
+  const rows = cleaned.slice(1).map(r => {
+    const o = {};
+    headers.forEach((h, i) => { o[h] = r[i] !== undefined ? String(r[i]).trim() : ''; });
+    return o;
+  });
+  return { headers, rows, delimiter:delim };
+}
+
+/* ---- Value resolvers: turn free text from a spreadsheet into real system values ---- */
+function normalizePhone(v){ return String(v==null?'':v).replace(/[^\d]/g, '').replace(/^88/, ''); }
+function normalizeKey(v){ return String(v==null?'':v).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+/* Matches on exact name first, then a contains-match, so "Dhaka Polytechnic" finds
+   "Dhaka Polytechnic Institute" without forcing the user to type the full legal name. */
+function resolveByName(list, raw, labelOf){
+  const key = normalizeKey(raw);
+  if(!key) return null;
+  const exact = list.find(x => normalizeKey(labelOf(x)) === key);
+  if(exact) return exact;
+  return list.find(x => { const l = normalizeKey(labelOf(x)); return l.includes(key) || key.includes(l); }) || null;
+}
+
+function resolveInstitutionId(raw){
+  const hit = resolveByName(DB.institutions, raw, i=>i.name);
+  if(hit) return { value: hit.id };
+  const short = DB.institutions.find(i => normalizeKey(i.short_name||'') === normalizeKey(raw));
+  if(short) return { value: short.id };
+  return { value: null, warning: `Institution "${raw}" not found — will import without an institution` };
+}
+function resolveCourseId(raw){
+  const hit = resolveByName(DB.courses, raw, c=>c.name);
+  if(hit) return { value: hit.id };
+  const byCode = DB.courses.find(c => normalizeKey(c.code||'') === normalizeKey(raw));
+  if(byCode) return { value: byCode.id };
+  return { value: null, warning: `Course "${raw}" not found — will import without a course` };
+}
+function resolveAssigneeId(raw){
+  const hit = resolveByName(DB.users, raw, u=>u.name);
+  if(hit) return { value: hit.id };
+  return { value: null, warning: `Staff "${raw}" not found — will fall back to the importing user` };
+}
+function resolveLeadSource(raw){
+  const key = normalizeKey(raw);
+  const byKey = Object.keys(SOURCE_LABELS).find(k => normalizeKey(k) === key);
+  if(byKey) return { value: byKey };
+  const byLabel = Object.keys(SOURCE_LABELS).find(k => normalizeKey(SOURCE_LABELS[k]) === key);
+  if(byLabel) return { value: byLabel };
+  const partial = Object.keys(SOURCE_LABELS).find(k => normalizeKey(SOURCE_LABELS[k]).includes(key) && key.length>2);
+  if(partial) return { value: partial };
+  return { value: 'visit', warning: `Source "${raw}" not recognised — defaulted to Institute Visit` };
+}
+function resolveLeadStatus(raw){
+  const key = normalizeKey(raw);
+  const byKey = DB.leadPipeline.find(s => normalizeKey(s) === key);
+  if(byKey) return { value: byKey };
+  const byLabel = DB.leadPipeline.find(s => normalizeKey(LEAD_STATUS_LABELS[s]) === key);
+  if(byLabel) return { value: byLabel };
+  return { value: 'new', warning: `Status "${raw}" not recognised — defaulted to New` };
+}
+/* Accepts ISO, day-first and month-first slash/dash dates, plus raw Excel serial numbers (which is what
+   you get when a date column survives an .xlsx -> CSV round trip). */
+function resolveImportDate(raw){
+  const s = String(raw).trim();
+  if(/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)){
+    const [y,m,d] = s.split('-').map(Number);
+    return { value: `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}` };
+  }
+  const slash = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if(slash){
+    let [, a, b, y] = slash;
+    a = Number(a); b = Number(b); y = Number(y);
+    if(y < 100) y += 2000;
+    /* Day-first unless the first part can only be a month. */
+    const day = a > 12 ? a : (b > 12 ? b : a);
+    const mon = a > 12 ? b : (b > 12 ? a : b);
+    if(mon >= 1 && mon <= 12 && day >= 1 && day <= 31){
+      return { value: `${y}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}` };
+    }
+  }
+  if(/^\d{5}$/.test(s)){
+    const d = new Date(Date.UTC(1899, 11, 30) + Number(s) * 86400000);
+    return { value: d.toISOString().slice(0,10) };
+  }
+  return { value: TODAY, warning: `Date "${raw}" not understood — used today's date` };
+}
+function resolveEmail(raw){
+  const s = String(raw).trim();
+  if(!s) return { value: null };
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return { value: s, warning: `"${s}" doesn't look like a valid email` };
+  return { value: s };
+}
+/* BD mobile numbers are 11 digits, 01[3-9] + 8 more. Sheets routinely lose the leading zero to number
+   formatting, so that case is repaired silently; anything else is imported as-is but flagged, since a
+   wrong number is worth importing (the name is still useful) but not worth silently trusting. */
+function resolvePhone(raw){
+  let digits = normalizePhone(raw);
+  if(!digits) return { value: null };
+  if(digits.length === 10 && /^1[3-9]/.test(digits)) digits = '0' + digits;
+  if(!/^01[3-9]\d{8}$/.test(digits)){
+    return { value: digits, warning: `Phone "${raw}" isn't a valid 11-digit mobile number (${digits.length} digits)` };
+  }
+  return { value: digits };
+}
+
+/* ---- Field catalogue ----
+   The single source of truth for the whole import UI: the mapping dropdowns, the fixed-value pickers, the
+   preview columns and the per-column include toggles are all generated from this list, so adding a future
+   lead field means adding one entry here and nothing else. */
+const LEAD_IMPORT_FIELDS = [
+  { key:'name', label:'Full Name', required:true, type:'text',
+    aliases:['name','fullname','full name','lead name','student name','candidate name','candidate','participant'] },
+  { key:'phone', label:'Phone', required:true, type:'phone', resolve:resolvePhone,
+    aliases:['phone','mobile','contact','contactno','contact no','contact number','phone number','mobile number','cell','msisdn','whatsapp'] },
+  { key:'email', label:'Email', type:'email', resolve:resolveEmail,
+    aliases:['email','e mail','mail','email address','emailid'] },
+  { key:'institution_id', label:'Institution', type:'lookup', resolve:resolveInstitutionId,
+    aliases:['institution','institute','college','polytechnic','school','campus','organization'],
+    options:()=>DB.institutions.map(i=>({ value:i.id, label:i.name })) },
+  { key:'interested_course_id', label:'Interested Course', type:'lookup', resolve:resolveCourseId,
+    aliases:['course','interested course','program','programme','subject','trade','technology','interest'],
+    options:()=>DB.courses.map(c=>({ value:c.id, label:c.name })) },
+  { key:'source', label:'Source', type:'enum', resolve:resolveLeadSource, default:'visit',
+    aliases:['source','lead source','channel','origin','camefrom','came from'],
+    options:()=>Object.keys(SOURCE_LABELS).map(k=>({ value:k, label:SOURCE_LABELS[k] })) },
+  { key:'status', label:'Pipeline Status', type:'enum', resolve:resolveLeadStatus, default:'new',
+    aliases:['status','stage','pipeline','pipelinestage','lead status'],
+    options:()=>DB.leadPipeline.map(s=>({ value:s, label:LEAD_STATUS_LABELS[s] })) },
+  { key:'assigned_to', label:'Assigned To', type:'lookup', resolve:resolveAssigneeId,
+    aliases:['assignedto','assigned to','assignee','owner','marketing officer','officer','staff','responsible'],
+    options:()=>DB.users.filter(u=>u.status==='active').map(u=>({ value:u.id, label:u.name })) },
+  { key:'created_at', label:'Captured On', type:'date', resolve:resolveImportDate,
+    aliases:['date','created','createdat','created at','captured on','capturedon','lead date','entry date','visit date'] },
+];
+
+function leadImportField(key){ return LEAD_IMPORT_FIELDS.find(f=>f.key===key) || null; }
+function leadImportFieldOptions(key){ const f = leadImportField(key); return f && f.options ? f.options() : []; }
+
+/* Renders a stored system value back into something human-readable for the preview grid. */
+function leadImportDisplayValue(key, value){
+  if(value === null || value === undefined || value === '') return '—';
+  const f = leadImportField(key);
+  if(f && f.options){
+    const hit = f.options().find(o => String(o.value) === String(value));
+    return hit ? hit.label : String(value);
+  }
+  return String(value);
+}
+
+/* ---- Auto-mapping ---- */
+/* Scores each header against a field's aliases: exact alias match wins, then containment, so a column
+   called "Student Mobile No." still lands on `phone` without user intervention. */
+function scoreHeaderAgainstField(header, field){
+  const h = normalizeKey(header);
+  if(!h) return 0;
+  if(h === normalizeKey(field.key) || h === normalizeKey(field.label)) return 100;
+  for(const a of field.aliases){
+    const na = normalizeKey(a);
+    if(h === na) return 90;
+  }
+  for(const a of field.aliases){
+    const na = normalizeKey(a);
+    if(na.length >= 4 && (h.includes(na) || na.includes(h))) return 60;
+  }
+  return 0;
+}
+
+function autoMapColumns(headers){
+  const mapping = {};
+  const taken = new Set();
+  /* Best global match first so a sheet with both "Name" and "Institution Name" doesn't give
+     "Institution Name" to the `name` field just because it appears first. */
+  const pairs = [];
+  headers.forEach(h => LEAD_IMPORT_FIELDS.forEach(f => {
+    const score = scoreHeaderAgainstField(h, f);
+    if(score > 0) pairs.push({ header:h, key:f.key, score });
+  }));
+  pairs.sort((a,b) => b.score - a.score);
+  pairs.forEach(p => {
+    if(mapping[p.key] || taken.has(p.header)) return;
+    mapping[p.key] = p.header;
+    taken.add(p.header);
+  });
+  return mapping;
+}
+
+/* ---- Validation / preview ---- */
+/* mapping      : { fieldKey: sourceColumnName }  — value read from the file, per row
+   fixedValues  : { fieldKey: systemValue }       — one value applied to every row (the common case for a
+                                                    single institute visit: same institution, source, owner)
+   File mapping always wins over a fixed value when both are set for a field. */
+function buildLeadImportPreview(rawRows, mapping, fixedValues, opts){
+  mapping = mapping || {}; fixedValues = fixedValues || {}; opts = opts || {};
+  const fallbackAssignee = opts.assignedTo || null;
+  const existingPhones = new Set(DB.leads.map(l => normalizePhone(l.phone)).filter(Boolean));
+  const seenInFile = new Set();
+
+  const rows = (rawRows||[]).map((raw, idx) => {
+    const values = {}, issues = [];
+
+    LEAD_IMPORT_FIELDS.forEach(f => {
+      const col = mapping[f.key];
+      const fromFile = col && raw[col] !== undefined && String(raw[col]).trim() !== '';
+      if(fromFile){
+        const out = f.resolve ? f.resolve(String(raw[col]).trim()) : { value: String(raw[col]).trim() };
+        values[f.key] = out.value;
+        if(out.warning) issues.push({ level:'warn', field:f.key, text:out.warning });
+      } else if(fixedValues[f.key] !== undefined && fixedValues[f.key] !== '' && fixedValues[f.key] !== null){
+        /* Already a system value — it came from a picker built off field.options, so no resolving. */
+        const fv = fixedValues[f.key];
+        values[f.key] = (f.type === 'lookup' || f.key === 'assigned_to') ? Number(fv) : fv;
+      } else {
+        values[f.key] = f.default !== undefined ? f.default : null;
+      }
+      if(f.required && (values[f.key] === null || values[f.key] === '')){
+        issues.push({ level:'error', field:f.key, text:`${f.label} is required` });
+      }
+    });
+
+    if(values.created_at == null) values.created_at = TODAY;
+    if(values.assigned_to == null) values.assigned_to = fallbackAssignee;
+
+    const phoneKey = normalizePhone(values.phone);
+    let duplicate = false;
+    if(phoneKey){
+      if(existingPhones.has(phoneKey)){
+        duplicate = true;
+        issues.push({ level:'dup', field:'phone', text:'This phone already exists in Leads' });
+      } else if(seenInFile.has(phoneKey)){
+        duplicate = true;
+        issues.push({ level:'dup', field:'phone', text:'Duplicate phone earlier in this file' });
+      }
+      seenInFile.add(phoneKey);
+    }
+
+    const hasError = issues.some(i => i.level === 'error');
+    const status = hasError ? 'error' : (duplicate ? 'duplicate' : (issues.length ? 'warn' : 'ready'));
+    return {
+      rowNo: idx + 1, raw, values, issues, status,
+      /* Errored and duplicate rows start unticked but stay togglable — the operator may know a repeated
+         phone is a genuinely different person (shared family number is common here). */
+      include: !hasError && !duplicate
+    };
+  });
+
+  return { rows, summary: leadImportSummary(rows) };
+}
+
+function leadImportSummary(rows){
+  return {
+    total: rows.length,
+    ready: rows.filter(r => r.status === 'ready').length,
+    warn: rows.filter(r => r.status === 'warn').length,
+    duplicate: rows.filter(r => r.status === 'duplicate').length,
+    error: rows.filter(r => r.status === 'error').length,
+    selected: rows.filter(r => r.include).length
+  };
+}
+
+/* Recomputes required-field errors, duplicate detection and row status from the values as they currently
+   stand, rather than from the original file. Needed because the preview grid is editable: fixing an
+   unmatched institution or a typo'd phone in place has to move that row out of the error/duplicate bucket
+   immediately, and can equally push a different row into it. Resolver warnings raised at parse time are
+   preserved; the edit handler clears the ones belonging to a field the user has since corrected. */
+function revalidateLeadImportPreview(preview){
+  if(!preview) return preview;
+  const existingPhones = new Set(DB.leads.map(l => normalizePhone(l.phone)).filter(Boolean));
+  const seen = new Set();
+
+  preview.rows.forEach(r => {
+    const wasBlocked = r.status === 'error';
+    const issues = r.issues.filter(i => i.level === 'warn');
+
+    LEAD_IMPORT_FIELDS.forEach(f => {
+      if(f.required && (r.values[f.key] === null || r.values[f.key] === '')){
+        issues.push({ level:'error', field:f.key, text:`${f.label} is required` });
+      }
+    });
+
+    const phoneKey = normalizePhone(r.values.phone);
+    let duplicate = false;
+    if(phoneKey){
+      if(existingPhones.has(phoneKey)){
+        duplicate = true;
+        issues.push({ level:'dup', field:'phone', text:'This phone already exists in Leads' });
+      } else if(seen.has(phoneKey)){
+        duplicate = true;
+        issues.push({ level:'dup', field:'phone', text:'Duplicate phone earlier in this file' });
+      }
+      seen.add(phoneKey);
+    }
+
+    r.issues = issues;
+    const hasError = issues.some(i => i.level === 'error');
+    r.status = hasError ? 'error' : (duplicate ? 'duplicate' : (issues.length ? 'warn' : 'ready'));
+    /* A row that still can't be written must not stay ticked. Conversely, someone who just repaired a
+       blocked row did so because they want it in, so it rejoins the selection automatically. */
+    if(hasError) r.include = false;
+    else if(wasBlocked) r.include = !duplicate;
+  });
+
+  preview.summary = leadImportSummary(preview.rows);
+  return preview;
+}
+
+/* ---- Commit ---- */
+/* fieldKeys = the columns the user left ticked on the preview. Unticked optional fields fall back to the
+   field default rather than being written as the imported (but rejected) value. */
+function importLeads(previewRows, fieldKeys, importedBy, meta){
+  meta = meta || {};
+  const keys = fieldKeys && fieldKeys.length ? fieldKeys : LEAD_IMPORT_FIELDS.map(f=>f.key);
+  const created = [];
+  (previewRows||[]).forEach(r => {
+    if(!r.include || r.status === 'error') return;
+    const lead = {
+      id: nextId(DB.leads),
+      name: r.values.name,
+      phone: r.values.phone,
+      email: keys.includes('email') ? (r.values.email || null) : null,
+      institution_id: keys.includes('institution_id') ? (r.values.institution_id || null) : null,
+      source: keys.includes('source') ? (r.values.source || 'visit') : 'visit',
+      source_session_id: meta.sourceSessionId || null,
+      interested_course_id: keys.includes('interested_course_id') ? (r.values.interested_course_id || null) : null,
+      status: keys.includes('status') ? (r.values.status || 'new') : 'new',
+      assigned_to: keys.includes('assigned_to') ? (r.values.assigned_to || importedBy || null) : (importedBy || null),
+      created_at: keys.includes('created_at') ? (r.values.created_at || TODAY) : TODAY,
+      imported: true,
+      import_batch: meta.batchRef || null
+    };
+    DB.leads.push(lead);
+    created.push(lead);
+  });
+
+  if(created.length){
+    DB.auditLogs.push({
+      id: nextId(DB.auditLogs), user_id: importedBy || null, module:"lead", action:"import",
+      record: `Bulk import — ${created.length} lead(s) added from ${meta.fileName || 'pasted data'}${meta.skipped ? ` (${meta.skipped} row(s) skipped)` : ''}`,
+      date: TODAY + " " + new Date().toTimeString().slice(0,5)
+    });
+  }
+  return created;
+}
+
+/* Template the user can download, fill in and re-upload — headers deliberately match the alias lists so a
+   round-tripped template auto-maps with zero manual work. */
+function leadImportTemplateCsv(){
+  const headers = ['Full Name','Phone','Email','Institution','Interested Course','Source','Pipeline Status','Assigned To','Captured On'];
+  const sample = [
+    ['Md. Karim Hossain','01712345678','karim@example.com', DB.institutions[0]?.name||'Dhaka Polytechnic Institute', DB.courses[0]?.name||'', 'Institute Visit','New', DB.users.find(u=>u.role_id===3)?.name||'', TODAY],
+    ['Ayesha Siddiqua','01812345679','','', DB.courses[1]?.name||'', 'Online','Contacted','', '']
+  ];
+  const esc = v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : String(v);
+  return [headers, ...sample].map(r => r.map(esc).join(',')).join('\n');
+}
+
 /* ---------------- Online Sessions / Webinars (marketing outreach to polytechnic students) ----------------
    Separate from physical Institution Visits — these are online webinars/live sessions (Zoom/Meet/Facebook Live)
    run for a target polytechnic's students to promote courses. Tracked here so marketing can see attendance and
