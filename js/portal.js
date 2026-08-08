@@ -217,7 +217,6 @@ function renderPortalBrowseCourses(){
     </div>`;
   }).join('');
   return `
-  <div class="view-header"><div><h1>Browse Courses</h1><p>Pick a course, choose your session & batch, then pay online or request enrollment</p></div></div>
   ${hasActiveCourse ? `<div class="badge badge-amber" style="white-space:normal;margin-bottom:18px;">${icon('shield')} You're already enrolled in a primary course. Adding a second course requires Admin approval — please contact the office.</div>` : ''}
   ${pendingReq ? `<div class="badge badge-blue" style="white-space:normal;margin-bottom:18px;">${icon('clock')} You already have a pending enrollment request for ${courseName(pendingReq.course_id)} — awaiting Admin review.</div>` : ''}
   <div class="grid grid-3">${cards}</div>`;
@@ -296,7 +295,7 @@ function renderPortalCourse(){
   if(!course) return `<div class="empty-state">${icon('bookOpen')}<p>No course enrolled yet.</p><button class="btn btn-primary btn-sm" style="margin-top:14px;" data-action="pgo" data-pview="browse">${icon('plus')} Browse Courses</button></div>`;
   const progress = DB.moduleProgress.filter(p=>p.student_id===s.id);
   return `
-  <div class="view-header"><div><h1>My Course</h1><p>${course.name}</p></div><div class="view-actions">${statusBadge(enr.status)}</div></div>
+  <div class="view-header"><div><h2 class="view-subject">${course.name}</h2></div><div class="view-actions">${statusBadge(enr.status)}</div></div>
   <div class="grid grid-3" style="margin-bottom:20px;">
     ${kpiCard('batch','Batch', batchName(enr.batch_id), null, '#ff6533')}
     ${kpiCard('calendar','Enrolled On', fmtDate(enr.date), null, '#06b6d4')}
@@ -345,7 +344,6 @@ function renderPortalAttendance(){
     </div>`;
   }).join('');
   return `
-  <div class="view-header"><div><h1>Attendance</h1><p>Your session-wise attendance history, per course</p></div></div>
   ${cards}`;
 }
 
@@ -355,7 +353,6 @@ function renderPortalPayments(){
   const payments = DB.payments.filter(p=>p.student_id===s.id);
   const installments = inv ? DB.paymentInstallments.filter(x=>x.invoice_id===inv.id) : [];
   return `
-  <div class="view-header"><div><h1>Payments</h1><p>Fee summary, installments & payment history</p></div></div>
   <div class="grid grid-3" style="margin-bottom:20px;">
     ${kpiCard('file','Total Fee', fmtMoney(inv?.total||0), null, '#ff6533')}
     ${kpiCard('checkCircle','Paid', fmtMoney(inv?.paid||0), null, '#10b981')}
@@ -410,7 +407,6 @@ function renderPortalMigration(){
   const s = pStudent(); const course = pCourse();
   const myMigrations = DB.courseMigrations.filter(m=>m.student_id===s.id);
   return `
-  <div class="view-header"><div><h1>Course Migration</h1><p>Request to switch to a different course — see fee impact instantly</p></div></div>
   <div class="card" style="margin-bottom:22px;">
     <div class="card-header"><h3>Request New Migration</h3></div>
     <div class="card-pad">
@@ -461,7 +457,6 @@ function renderPortalCertificate(){
     {label:'No outstanding due', ok: !inv || inv.due===0},
   ];
   return `
-  <div class="view-header"><div><h1>Certificate</h1><p>Auto-unlocked once all completion conditions are met</p></div></div>
   <div class="card card-pad" style="margin-bottom:20px;">
     <h3 style="margin:0 0 14px;font-size:14.5px;">Eligibility Checklist</h3>
     ${conditions.map(c=>`<div class="flex-gap" style="margin-bottom:10px;"><span style="color:${c.ok?'var(--success-500)':'var(--gray-300)'};">${icon('checkCircle')}</span><span style="font-size:13px;">${c.label}</span>${c.ok?statusBadge('active','Met'):statusBadge('pending','Not yet')}</div>`).join('')}
@@ -479,7 +474,6 @@ function renderPortalIdCard(){
   const s = pStudent();
   const card = DB.idCards.find(c=>c.student_id===s.id);
   return `
-  <div class="view-header"><div><h1>Digital ID Card</h1><p>QR-coded student identity card</p></div></div>
   ${card ? `<div class="showcase-wrap">${idCardPreview(s, card)}</div>
   <div class="flex-gap" style="justify-content:center;margin-top:18px;">
     <span class="badge ${card.status==='active'?'badge-green':'badge-red'}" style="font-size:12.5px;padding:6px 14px;">${statusBadge(card.status)}</span>
@@ -500,7 +494,6 @@ function renderPortalNotifications(){
   ];
   const all = [...notifs, ...generic];
   return `
-  <div class="view-header"><div><h1>Notifications</h1><p>Alerts, reminders & announcements</p></div></div>
   <div class="card">
     <div class="timeline card-pad">
       ${all.map(n=>`<div class="timeline-item"><div class="when">${fmtDate(n.date)} · ${n.channel.toUpperCase()}</div><div class="what">${n.message}</div><div class="who">${n.type.replace(/_/g,' ')}</div></div>`).join('')}
@@ -511,7 +504,6 @@ function renderPortalNotifications(){
 /* ---------------- Support ---------------- */
 function renderPortalSupport(){
   return `
-  <div class="view-header"><div><h1>Support</h1><p>Raise a help request to the office</p></div></div>
   <div class="grid grid-2" style="align-items:start;">
     <div class="card card-pad">
       <h3 style="margin:0 0 14px;font-size:14.5px;">New Support Ticket</h3>
@@ -532,7 +524,7 @@ function renderPortalSupport(){
 function renderPortalProfile(){
   const s = pStudent();
   return `
-  <div class="view-header"><div><h1>My Profile</h1><p>Personal information & documents</p></div>
+  <div class="view-header"><div></div>
     <div class="view-actions">${s.profile_completed?statusBadge('active','Profile Complete'):statusBadge('pending','Incomplete')}</div>
   </div>
   <div class="grid grid-3" style="align-items:start;">

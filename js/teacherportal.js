@@ -168,7 +168,6 @@ function renderTpDashboard(){
 function renderTpBatches(){
   const batches = tpBatches();
   return `
-  <div class="view-header"><div><h1>My Batches</h1><p>All batches you're currently assigned to teach or coordinate</p></div></div>
   <div class="grid grid-3">${batches.map(b=>tpBatchCardHtml(b)).join('') || '<div class="empty-state">'+icon('batch')+'<p>No batches assigned yet.</p></div>'}</div>`;
 }
 
@@ -177,7 +176,7 @@ let tpAttBatchId = null, tpAttDate = null, tpAttModuleId = null, tpAttMarks = {}
 function renderTpAttendance(){
   tpAttDate = tpAttDate || TODAY;
   const batches = tpBatches().filter(b=>b.status!=='upcoming');
-  if(!batches.length) return `<div class="view-header"><div><h1>Attendance</h1><p>Mark attendance for your assigned batches</p></div></div><div class="empty-state">${icon('attendance')}<p>No active batches to mark attendance for yet.</p></div>`;
+  if(!batches.length) return `<div class="empty-state">${icon('attendance')}<p>No active batches to mark attendance for yet.</p></div>`;
   if(!tpAttBatchId || !batches.some(b=>b.id===tpAttBatchId)) tpAttBatchId = batches[0].id;
   const batch = batches.find(b=>b.id===tpAttBatchId);
   const course = DB.courses.find(c=>c.id===batch.course_id);
@@ -198,7 +197,6 @@ function renderTpAttendance(){
       <td><div class="flex-gap">${['present','absent','late','excused'].map(st=>`<button class="btn btn-sm ${tpAttMarks[s.id]===st?'btn-primary':'btn-secondary'}" data-action="tp-mark-attendance-cell" data-studentid="${s.id}" data-status="${st}" style="padding:5px 10px;">${st[0].toUpperCase()}</button>`).join('')}</div></td>
     </tr>`).join('');
   return `
-  <div class="view-header"><div><h1>Attendance</h1><p>Mark attendance for your assigned batches — synced live with the admin panel</p></div></div>
   <div class="filter-bar">
     <select id="tpAttBatchSelect" onchange="onTpAttendanceFilterChange()">${batches.map(b=>`<option value="${b.id}" ${b.id===batch.id?'selected':''}>${b.name} — ${courseName(b.course_id)}</option>`).join('')}</select>
     <input type="date" id="tpAttDateInput" value="${tpAttDate}" onchange="onTpAttendanceFilterChange()">
@@ -220,10 +218,10 @@ function onTpAttendanceFilterChange(){
 /* ---------------- My Students ---------------- */
 function renderTpStudents(){
   const batches = tpBatches();
-  const groups = batches.map(b=>{
+  const groups = batches.map((b,idx)=>{
     const roster = activeStudentsInBatch(b.id);
     return `<div style="margin-bottom:22px;">
-      <h3 class="report-section-title">${b.name} — ${courseName(b.course_id)} <span class="cell-sub" style="font-weight:400;">(${roster.length} students)</span></h3>
+      <h3 class="report-section-title" ${idx===0?'style="margin-top:0;"':''}>${b.name} — ${courseName(b.course_id)} <span class="cell-sub" style="font-weight:400;">(${roster.length} students)</span></h3>
       <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th></th><th>Student</th><th>Code</th><th>Phone</th><th>Attendance %</th></tr></thead><tbody>
       ${roster.length ? roster.map(s=>{
         const att = attendanceSummaryForStudent(s.id, b.id);
@@ -232,7 +230,7 @@ function renderTpStudents(){
       </tbody></table></div></div>
     </div>`;
   }).join('');
-  return `<div class="view-header"><div><h1>My Students</h1><p>Roster across all your assigned batches (read-only)</p></div></div>${groups || `<div class="empty-state">${icon('students')}<p>No batches assigned yet.</p></div>`}`;
+  return groups || `<div class="empty-state">${icon('students')}<p>No batches assigned yet.</p></div>`;
 }
 
 /* ---------------- My Payments ---------------- */
@@ -265,8 +263,7 @@ function renderTpPayments(){
       <td>${p.status==='paid' ? `<button class="btn btn-sm btn-ghost" title="View & print voucher" data-action="tp-view-voucher" data-id="${p.id}">${icon('printer')}</button>` : ''}</td>
     </tr>`).join('');
   return `
-  <div class="view-header"><div><h1>My Payments</h1><p>Your pay rate, computed earnings & disbursement history — read only</p></div></div>
-  <h3 class="report-section-title">Pay Rate & Earnings by Batch</h3>
+  <h3 class="report-section-title" style="margin-top:0;">Pay Rate & Earnings by Batch</h3>
   <div class="card" style="margin-bottom:26px;"><div class="table-wrap"><table class="data-table"><thead><tr><th>Batch</th><th>Course</th><th>Pay Rate</th><th>Earned</th><th>Paid</th><th>Outstanding</th></tr></thead><tbody>${rateRows || '<tr><td colspan="6" class="muted" style="text-align:center;padding:16px;">No batches assigned.</td></tr>'}</tbody></table></div></div>
   <h3 class="report-section-title">Payment / Voucher History</h3>
   <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>Voucher</th><th>Batch</th><th>Type</th><th>Period</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${payRows || '<tr><td colspan="7" class="muted" style="text-align:center;padding:16px;">No payment requests yet.</td></tr>'}</tbody></table></div></div>`;
@@ -277,7 +274,6 @@ function renderTpProfile(){
   const u = tpTeacher();
   const batches = tpBatches();
   return `
-  <div class="view-header"><div><h1>Profile</h1><p>Your account details</p></div></div>
   <div class="card card-pad" style="max-width:560px;text-align:center;">
     ${profilePhotoBlockHtml(u.name, u.photo, {inputId:'tpProfilePhotoInput', previewId:'tpProfilePhotoPreview', removeAction:'tp-remove-photo'})}
     <b style="display:block;margin:12px 0 2px;font-size:15px;">${u.name}</b>

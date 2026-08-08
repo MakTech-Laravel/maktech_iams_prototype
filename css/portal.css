@@ -7,13 +7,21 @@
    turning into an overflowing header bar again.
    ============================================================ */
 
-.portal-app-shell{ min-height:100vh; }
+.portal-app-shell{ min-height:calc(100vh - var(--banner-h)); }
 .portal-app-shell .sidebar-footer{ font-size:11px; }
 
-.portal-content{ padding:26px 30px 70px; max-width:1180px; width:100%; margin:0 auto; flex:1; }
+/* Fills the whole column beside the sidebar — no centred max-width, which used to leave
+   large dead margins on both sides of every page on wide screens. */
+.portal-content{ padding:24px 28px 60px; width:100%; min-width:0; flex:1; }
+
+/* The topbar already shows the page title + description, so portal pages no longer repeat it.
+   What's left in a view-header is contextual only (course name, status badges). */
+.portal-content .view-header{ margin-bottom:16px; }
+.portal-content .view-header:empty{ display:none; }
+.view-subject{ font-size:16px; margin:0; color:var(--gray-900); }
 
 /* Dark backdrop behind the sidebar on mobile — tap it to close, like most modern apps */
-.sidebar-scrim{ display:none; position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:35; }
+.sidebar-scrim{ display:none; position:fixed; top:var(--banner-h); left:0; right:0; bottom:0; background:rgba(15,23,42,.45); z-index:35; }
 .sidebar-scrim.show{ display:block; }
 
 @media (max-width: 980px){

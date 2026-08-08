@@ -764,7 +764,8 @@ console.log('\n=== TEACHER PORTAL (teacher-portal.html) ===');
 
   // My Students — read only roster
   win.tpNavigate('students');
-  check('My Students view renders batch rosters', doc.getElementById('portalContent').innerHTML.includes('My Students'));
+  check('My Students page title shown once, in the topbar', doc.getElementById('portalPageTitle').textContent === 'My Students' && !doc.getElementById('portalContent').innerHTML.includes('<h1>'));
+  check('My Students view renders a roster table per assigned batch', doc.querySelectorAll('#portalContent table').length === win.tpBatches().length);
   check('No action buttons (read-only) on student rows', doc.querySelectorAll('#portalContent [data-action]').length === 0);
 
   // Attendance marking — mark a student absent and save, verify it lands in DB.attendanceRecords
