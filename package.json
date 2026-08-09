@@ -1,16 +1,27 @@
 {
-  "name": "prototype",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "devDependencies": {
-    "jsdom": "^29.1.1",
-    "playwright": "^1.62.1"
-  }
+    "$schema": "https://www.schemastore.org/package.json",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "test:prototype": "node public/prototype/_smoketest.js",
+        "test:prototype:browser": "node public/prototype/_filetest.js"
+    },
+    "devDependencies": {
+        "@inertiajs/react": "^3.6.1",
+        "@vitejs/plugin-react": "^6.0.5",
+        "axios": "^1.19.0",
+        "chart.js": "^4.5.1",
+        "concurrently": "^10.0.4",
+        "jsdom": "^29.1.1",
+        "laravel-vite-plugin": "^3.1.3",
+        "playwright": "^1.62.1",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
+        "vite": "^8.2.1"
+    },
+    "dependencies": {
+        "puppeteer": "^25.5.0"
+    }
 }
