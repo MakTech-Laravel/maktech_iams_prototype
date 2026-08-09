@@ -1,0 +1,6 @@
+{
+  "name": "iams-prototype-reference",
+  "private": true,
+  "type": "commonjs",
+  "description": "Scopes this directory back to CommonJS. The Laravel root package.json declares \"type\": \"module\", which would otherwise break the prototype's require()-based test harness (_smoketest.js, _filetest.js, _staticserver.js). No dependencies here on purpose — they resolve from the root node_modules."
+}
