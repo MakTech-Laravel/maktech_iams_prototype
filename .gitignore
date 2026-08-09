@@ -1,4 +1,37 @@
-node_modules/
-shots/
-_fixtures/
-_test_output.txt
+*.log
+.DS_Store
+.env
+.env.backup
+.env.production
+.phpactor.json
+.phpunit.result.cache
+/.fleet
+/.idea
+/.nova
+/.phpunit.cache
+/.vscode
+/.zed
+/auth.json
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+/vendor
+Homestead.json
+Homestead.yaml
+Thumbs.db
+
+# Prototype reference app (public/prototype) — generated test artefacts only.
+# The prototype source itself is tracked; these are regenerable outputs.
+# /shots and /_fixtures are at the root because the npm test scripts run from the project root,
+# so Playwright writes its screenshots relative to there rather than to the prototype folder.
+/shots
+/_fixtures
+/public/prototype/shots
+/public/prototype/_fixtures
+/public/prototype/_test_output.txt
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat

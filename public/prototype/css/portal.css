@@ -1,0 +1,87 @@
+/* ============================================================
+   Student & Teacher Portal — layout & components
+   Reuses the same sidebar/topbar shell as the Admin Panel (css/theme.css:
+   .app-shell, .sidebar, .nav-group/.nav-item, .main-col, .topbar) so both
+   portals get the exact same proven, responsive, collapsible navigation —
+   grouped sections mean new menu items always have a home without ever
+   turning into an overflowing header bar again.
+   ============================================================ */
+
+.portal-app-shell{ min-height:calc(100vh - var(--banner-h)); }
+.portal-app-shell .sidebar-footer{ font-size:11px; }
+
+/* Fills the whole column beside the sidebar — no centred max-width, which used to leave
+   large dead margins on both sides of every page on wide screens. */
+.portal-content{ padding:24px 28px 60px; width:100%; min-width:0; flex:1; }
+
+/* The topbar already shows the page title + description, so portal pages no longer repeat it.
+   What's left in a view-header is contextual only (course name, status badges). */
+.portal-content .view-header{ margin-bottom:16px; }
+.portal-content .view-header:empty{ display:none; }
+.view-subject{ font-size:16px; margin:0; color:var(--gray-900); }
+
+/* Dark backdrop behind the sidebar on mobile — tap it to close, like most modern apps */
+.sidebar-scrim{ display:none; position:fixed; top:var(--banner-h); left:0; right:0; bottom:0; background:rgba(15,23,42,.45); z-index:35; }
+.sidebar-scrim.show{ display:block; }
+
+@media (max-width: 980px){
+  .portal-content{ padding:18px 16px 60px; }
+  .portal-app-shell .topbar .who{ display:none; }
+}
+@media (max-width: 560px){
+  .portal-app-shell .topbar{ padding:0 14px; gap:10px; }
+  .portal-app-shell .topbar .page-sub{ display:none; }
+}
+
+/* ---------------- Welcome / hero banner ---------------- */
+.portal-hero{
+  border-radius:20px; padding:26px 28px; background:linear-gradient(120deg,var(--primary-600),var(--primary-800) 70%);
+  color:#fff; margin-bottom:22px; position:relative; overflow:hidden;
+}
+.portal-hero::after{ content:''; position:absolute; width:220px; height:220px; border-radius:50%; background:rgba(255,255,255,.08); right:-60px; top:-80px; }
+.portal-hero h2{ margin:0 0 6px; font-size:20px; }
+.portal-hero p{ margin:0; opacity:.85; font-size:13px; max-width:520px; }
+
+.due-banner{
+  display:flex; align-items:center; gap:12px; background:var(--warning-50); border:1px solid #fde68a; color:var(--warning-700);
+  border-radius:14px; padding:14px 18px; margin-bottom:20px; font-size:13px;
+}
+.due-banner.danger{ background:var(--danger-50); border-color:#fecaca; color:var(--danger-700); }
+.due-banner .ic-wrap{ width:36px; height:36px; border-radius:10px; background:rgba(255,255,255,.6); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.due-banner .ic-wrap svg{ width:18px; height:18px; }
+
+/* ---------------- Course progress card ---------------- */
+.course-progress-card{ padding:20px 22px; }
+.module-row{ display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--gray-100); }
+.module-row:last-child{ border-bottom:none; }
+.module-check{ width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.module-check svg{ width:14px; height:14px; }
+
+/* ---------------- Payment / receipt card ---------------- */
+.pay-method-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+@media (max-width:760px){ .pay-method-grid{ grid-template-columns:repeat(3,1fr); } }
+.pay-method{ border:1.5px solid var(--gray-200); border-radius:12px; padding:14px 8px; text-align:center; cursor:pointer; font-size:11.5px; font-weight:700; color:var(--gray-600); }
+.pay-method:hover{ border-color:var(--primary-300); background:var(--primary-50); }
+.pay-method.selected{ border-color:var(--primary-500); background:var(--primary-50); color:var(--primary-700); }
+.pay-method .pm-logo{ width:34px; height:34px; border-radius:8px; margin:0 auto 8px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:11px; color:#fff; }
+
+/* ---------------- ID card / certificate showcase ---------------- */
+.showcase-wrap{ display:flex; justify-content:center; padding:20px 0; }
+
+/* ---------------- Support ticket ---------------- */
+.ticket-item{ border:1px solid var(--gray-100); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+
+/* ---------------- Auth login/signup toggle ---------------- */
+.auth-toggle{ display:flex; gap:4px; background:var(--gray-100); border-radius:12px; padding:4px; margin-bottom:26px; }
+.auth-toggle-btn{ flex:1; padding:9px 0; border-radius:9px; background:transparent; border:none; font-size:13px; font-weight:700; color:var(--gray-500); transition:background .15s ease, color .15s ease; }
+.auth-toggle-btn.active{ background:#fff; color:var(--primary-700); box-shadow:0 1px 3px rgba(15,23,42,.08); }
+.auth-toggle-btn:hover:not(.active){ color:var(--gray-700); }
+
+/* ---------------- Browse courses / self-enrollment ---------------- */
+.course-catalog-card{ display:flex; flex-direction:column; padding:20px 22px; height:100%; }
+.course-catalog-card .price{ font-size:19px; font-weight:800; color:var(--primary-700); }
+.pay-option-card{ border:1.5px solid var(--gray-200); border-radius:12px; padding:14px 16px; cursor:pointer; transition:border-color .15s ease, background .15s ease; }
+.pay-option-card:hover{ border-color:var(--primary-300); background:var(--primary-50); }
+.pay-option-card.selected{ border-color:var(--primary-500); background:var(--primary-50); }
+.pay-option-card b{ font-size:13px; display:block; margin-bottom:2px; }
+.pay-option-card span{ font-size:11.5px; color:var(--gray-500); }
