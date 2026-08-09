@@ -1,0 +1,8 @@
+/* Application stylesheet.
+   Deliberately not Tailwind: theme.css and portal.css are the hand-written design system carried over
+   from the prototype (navy sidebar, orange brand, badge system, import wizard), and they are the source
+   of truth for the visual identity. The frozen copy under public/prototype is the reference spec; these
+   are the living files the app evolves. */
+
+@import './theme.css';
+@import './portal.css';
